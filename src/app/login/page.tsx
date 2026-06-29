@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { HardHat, Shield, Eye, EyeOff } from "lucide-react";
+import { HardHat, Shield, Eye, EyeOff, Check } from "lucide-react";
 import { ConstructionBg } from "@/components/construction-bg";
 
 type UserType = "client" | "admin";
@@ -14,23 +14,36 @@ export default function LoginPage() {
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [contactNumber, setContactNumber] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [status, setStatus] = useState<"idle" | "loading" | "sent" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
+  const hasMinLength = password.length >= 8;
+  const hasUppercase = /[A-Z]/.test(password);
+  const hasNumber = /[0-9]/.test(password);
+  const passwordsMatch = password === confirmPassword && password.length > 0;
+  const signupValid = hasMinLength && hasUppercase && hasNumber && passwordsMatch && agreedToTerms && fullName.trim().length > 0;
+
   async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
+    if (!signupValid) return;
     setStatus("loading");
     setErrorMsg("");
     const supabase = createClient();
 
-    const redirectPath = userType === "admin" ? "/admin" : "/dashboard";
-
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await supabase.auth.signUp({
       email,
+      password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/set-password?next=" + redirectPath)}`,
-        shouldCreateUser: true,
+        data: {
+          full_name: fullName.trim(),
+          contact_number: contactNumber.trim(),
+        },
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
       },
     });
 
@@ -73,11 +86,23 @@ export default function LoginPage() {
 
     if (error) {
       setStatus("error");
-      setErrorMsg(error.message);
+      setErrorMsg(error.message || "Invalid email or password. Please try again.");
     } else {
       const redirectPath = userType === "admin" ? "/admin" : "/dashboard";
       window.location.href = redirectPath;
     }
+  }
+
+  function resetForm() {
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
+    setFullName("");
+    setContactNumber("");
+    setShowPassword(false);
+    setAgreedToTerms(false);
+    setStatus("idle");
+    setErrorMsg("");
   }
 
   return (
@@ -85,22 +110,11 @@ export default function LoginPage() {
       <style>{`html, body { background: #0f2b5b !important; }`}</style>
       <ConstructionBg />
 
-      {/* Left construction illustration — covers left half */}
       <div className="fixed left-0 top-0 bottom-0 w-1/2 pointer-events-none overflow-hidden">
-        <img
-          src="/bg-left.png"
-          alt=""
-          className="w-full h-full object-cover object-right opacity-70"
-        />
+        <img src="/bg-left.png" alt="" className="w-full h-full object-cover object-right opacity-70" />
       </div>
-
-      {/* Right construction illustration — covers right half */}
       <div className="fixed right-0 top-0 bottom-0 w-1/2 pointer-events-none overflow-hidden">
-        <img
-          src="/bg-right.png"
-          alt=""
-          className="w-full h-full object-cover object-left opacity-70"
-        />
+        <img src="/bg-right.png" alt="" className="w-full h-full object-cover object-left opacity-70" />
       </div>
 
       <div className="relative z-10 flex items-center justify-center min-h-screen py-12 px-4">
@@ -114,41 +128,46 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <div className="flex rounded-xl bg-surface p-1 mb-6">
-          <button
-            type="button"
-            onClick={() => { setUserType("client"); setStatus("idle"); setErrorMsg(""); }}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all",
-              userType === "client"
-                ? "bg-white text-primary shadow-sm"
-                : "text-text-muted hover:text-primary"
-            )}
-          >
-            <HardHat className="h-4 w-4" />
-            Client
-          </button>
-          <button
-            type="button"
-            onClick={() => { setUserType("admin"); setStatus("idle"); setErrorMsg(""); }}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all",
-              userType === "admin"
-                ? "bg-white text-primary shadow-sm"
-                : "text-text-muted hover:text-primary"
-            )}
-          >
-            <Shield className="h-4 w-4" />
-            Admin
-          </button>
-        </div>
+        {/* Client/Admin tabs — login and forgot only (not signup) */}
+        {authMode !== "signup" && (
+          <div className="flex rounded-xl bg-surface p-1 mb-6">
+            <button
+              type="button"
+              onClick={() => { setUserType("client"); resetForm(); }}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all",
+                userType === "client"
+                  ? "bg-white text-primary shadow-sm"
+                  : "text-text-muted hover:text-primary"
+              )}
+            >
+              <HardHat className="h-4 w-4" />
+              Client
+            </button>
+            <button
+              type="button"
+              onClick={() => { setUserType("admin"); resetForm(); }}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all",
+                userType === "admin"
+                  ? "bg-white text-primary shadow-sm"
+                  : "text-text-muted hover:text-primary"
+              )}
+            >
+              <Shield className="h-4 w-4" />
+              Admin
+            </button>
+          </div>
+        )}
 
-        <div className="mb-6 p-3 rounded-lg text-sm bg-surface-alt text-primary-light">
-          {userType === "client"
-            ? "Upload drawings and receive instant quotations for your construction project."
-            : "Manage users, content, and view analytics."
-          }
-        </div>
+        {authMode !== "signup" && (
+          <div className="mb-6 p-3 rounded-lg text-sm bg-surface-alt text-primary-light">
+            {userType === "client"
+              ? "Upload drawings and receive instant quotations for your construction project."
+              : "Sign in to manage users, content, and view analytics."
+            }
+          </div>
+        )}
 
         {status === "sent" ? (
           <div className="text-center p-6 bg-green-50 rounded-xl">
@@ -157,21 +176,22 @@ export default function LoginPage() {
             </svg>
             <h2 className="mt-4 text-lg font-semibold text-green-800">Check your email</h2>
             <p className="mt-2 text-green-700">
-              We sent a {authMode === "forgot" ? "password reset" : "verification"} link to <strong>{email}</strong>
+              We sent a {authMode === "forgot" ? "password reset" : "confirmation"} link to <strong>{email}</strong>
             </p>
             <p className="mt-1 text-sm text-green-600">
               {authMode === "forgot"
                 ? "Click the link to reset your password."
-                : "Click the link to verify your account, then set your password."
+                : "Click the link to verify your account and start using the app."
               }
             </p>
             <button
-              onClick={() => { setStatus("idle"); setEmail(""); setAuthMode("login"); }}
+              onClick={() => { resetForm(); setAuthMode("login"); }}
               className="mt-4 text-sm text-accent hover:text-accent-hover underline"
             >
               Back to Log In
             </button>
           </div>
+
         ) : authMode === "login" ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
@@ -196,7 +216,7 @@ export default function LoginPage() {
                 </label>
                 <button
                   type="button"
-                  onClick={() => { setAuthMode("forgot"); setStatus("idle"); setErrorMsg(""); setPassword(""); }}
+                  onClick={() => { setAuthMode("forgot"); resetForm(); }}
                   className="text-xs text-accent hover:text-accent-hover hover:underline"
                 >
                   Forgot Password?
@@ -234,17 +254,20 @@ export default function LoginPage() {
               {status === "loading" ? "Signing in..." : "Log In"}
             </button>
 
-            <p className="text-center text-sm text-text-muted">
-              Don&apos;t have an account?{" "}
-              <button
-                type="button"
-                onClick={() => { setAuthMode("signup"); setStatus("idle"); setErrorMsg(""); setPassword(""); }}
-                className="font-medium text-accent hover:text-accent-hover hover:underline"
-              >
-                Sign Up
-              </button>
-            </p>
+            {userType === "client" && (
+              <p className="text-center text-sm text-text-muted">
+                Don&apos;t have an account?{" "}
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode("signup"); resetForm(); }}
+                  className="font-medium text-accent hover:text-accent-hover hover:underline"
+                >
+                  Sign Up
+                </button>
+              </p>
+            )}
           </form>
+
         ) : authMode === "forgot" ? (
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <div>
@@ -278,18 +301,38 @@ export default function LoginPage() {
               Remember your password?{" "}
               <button
                 type="button"
-                onClick={() => { setAuthMode("login"); setStatus("idle"); setErrorMsg(""); }}
+                onClick={() => { setAuthMode("login"); resetForm(); }}
                 className="font-medium text-accent hover:text-accent-hover hover:underline"
               >
                 Log In
               </button>
             </p>
           </form>
+
         ) : (
           <form onSubmit={handleSignUp} className="space-y-4">
+            <div className="mb-2 p-3 rounded-lg text-sm bg-surface-alt text-primary-light">
+              Create your client account to get construction quotations.
+            </div>
+
+            <div>
+              <label htmlFor="fullName" className="block text-sm font-medium text-foreground">
+                Full Name *
+              </label>
+              <input
+                id="fullName"
+                type="text"
+                required
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="Enter your full name"
+                className="mt-1 block w-full px-4 py-3 border border-border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent outline-none"
+              />
+            </div>
+
             <div>
               <label htmlFor="signup-email" className="block text-sm font-medium text-foreground">
-                Email address
+                Email address *
               </label>
               <input
                 id="signup-email"
@@ -297,10 +340,101 @@ export default function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder={userType === "client" ? "you@example.com" : "admin@company.com"}
+                placeholder="you@example.com"
                 className="mt-1 block w-full px-4 py-3 border border-border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent outline-none"
               />
             </div>
+
+            <div>
+              <label htmlFor="contactNumber" className="block text-sm font-medium text-foreground">
+                Contact Number
+              </label>
+              <input
+                id="contactNumber"
+                type="tel"
+                value={contactNumber}
+                onChange={(e) => setContactNumber(e.target.value)}
+                placeholder="+966 5XX XXX XXXX"
+                className="mt-1 block w-full px-4 py-3 border border-border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent outline-none"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="signup-password" className="block text-sm font-medium text-foreground">
+                Password *
+              </label>
+              <div className="relative mt-1">
+                <input
+                  id="signup-password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Create a strong password"
+                  className="block w-full px-4 py-3 pr-12 border border-border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-foreground"
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="confirm-password" className="block text-sm font-medium text-foreground">
+                Confirm Password *
+              </label>
+              <input
+                id="confirm-password"
+                type={showPassword ? "text" : "password"}
+                required
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm your password"
+                className="mt-1 block w-full px-4 py-3 border border-border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent outline-none"
+              />
+            </div>
+
+            {password.length > 0 && (
+              <div className="space-y-1 text-xs">
+                <div className={`flex items-center gap-1.5 ${hasMinLength ? "text-green-600" : "text-text-muted"}`}>
+                  <Check className="h-3.5 w-3.5" /> At least 8 characters
+                </div>
+                <div className={`flex items-center gap-1.5 ${hasUppercase ? "text-green-600" : "text-text-muted"}`}>
+                  <Check className="h-3.5 w-3.5" /> One uppercase letter
+                </div>
+                <div className={`flex items-center gap-1.5 ${hasNumber ? "text-green-600" : "text-text-muted"}`}>
+                  <Check className="h-3.5 w-3.5" /> One number
+                </div>
+                {confirmPassword.length > 0 && (
+                  <div className={`flex items-center gap-1.5 ${passwordsMatch ? "text-green-600" : "text-red-500"}`}>
+                    <Check className="h-3.5 w-3.5" /> Passwords match
+                  </div>
+                )}
+              </div>
+            )}
+
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={agreedToTerms}
+                onChange={(e) => setAgreedToTerms(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-border text-accent focus:ring-accent"
+              />
+              <span className="text-xs text-text-muted leading-relaxed">
+                I agree to the{" "}
+                <a href="/terms" target="_blank" className="text-accent hover:text-accent-hover underline">
+                  Terms &amp; Conditions
+                </a>{" "}
+                and{" "}
+                <a href="/privacy" target="_blank" className="text-accent hover:text-accent-hover underline">
+                  Privacy Policy
+                </a>
+              </span>
+            </label>
 
             {status === "error" && (
               <p className="text-sm text-red-600">{errorMsg}</p>
@@ -308,17 +442,17 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={status === "loading"}
+              disabled={!signupValid || status === "loading"}
               className="w-full py-3 px-4 bg-accent text-white font-medium rounded-lg hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {status === "loading" ? "Sending..." : "Sign Up"}
+              {status === "loading" ? "Creating account..." : "Sign Up"}
             </button>
 
             <p className="text-center text-sm text-text-muted">
               Already have an account?{" "}
               <button
                 type="button"
-                onClick={() => { setAuthMode("login"); setStatus("idle"); setErrorMsg(""); }}
+                onClick={() => { setAuthMode("login"); resetForm(); }}
                 className="font-medium text-accent hover:text-accent-hover hover:underline"
               >
                 Log In

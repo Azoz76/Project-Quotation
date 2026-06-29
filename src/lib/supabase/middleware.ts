@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PAGES = ["/login", "/auth/callback"];
+const PUBLIC_PAGES = ["/login", "/auth/callback", "/terms", "/privacy"];
 const PASSWORD_PAGES = ["/set-password", "/reset-password"];
 const ALL_AUTH_PAGES = [...PUBLIC_PAGES, ...PASSWORD_PAGES];
 

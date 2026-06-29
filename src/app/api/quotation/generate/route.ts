@@ -48,7 +48,7 @@ Include materials like: steel reinforcement, concrete, blocks/bricks, cement, sa
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "anthropic/claude-sonnet-4-20250514",
+        model: "openai/gpt-oss-120b:free",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
       }),

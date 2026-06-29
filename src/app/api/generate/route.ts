@@ -22,7 +22,7 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "anthropic/claude-sonnet-4-20250514",
+        model: "openai/gpt-oss-120b:free",
         messages: [
           { role: "system", content: systemPrompts[type] ?? systemPrompts.description },
           { role: "user", content: prompt },
