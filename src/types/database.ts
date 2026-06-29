@@ -55,7 +55,7 @@ export interface Database {
           location_lat: number | null;
           location_lng: number | null;
           location_address: string | null;
-          status: "draft" | "quoted" | "accepted" | "in_progress" | "completed";
+          status: "draft" | "reviewing" | "quoted" | "accepted" | "in_progress" | "completed";
           created_at: string;
           updated_at: string;
         };
@@ -67,7 +67,7 @@ export interface Database {
           location_lat?: number | null;
           location_lng?: number | null;
           location_address?: string | null;
-          status?: "draft" | "quoted" | "accepted" | "in_progress" | "completed";
+          status?: "draft" | "reviewing" | "quoted" | "accepted" | "in_progress" | "completed";
           created_at?: string;
           updated_at?: string;
         };
@@ -77,7 +77,7 @@ export interface Database {
           location_lat?: number | null;
           location_lng?: number | null;
           location_address?: string | null;
-          status?: "draft" | "quoted" | "accepted" | "in_progress" | "completed";
+          status?: "draft" | "reviewing" | "quoted" | "accepted" | "in_progress" | "completed";
           updated_at?: string;
         };
         Relationships: [
@@ -100,7 +100,7 @@ export interface Database {
           file_size: number;
           storage_path: string;
           public_url: string;
-          category: "image" | "document" | "drawing";
+          category: "image" | "document" | "drawing" | "permit";
           created_at: string;
         };
         Insert: {
@@ -112,12 +112,12 @@ export interface Database {
           file_size: number;
           storage_path: string;
           public_url: string;
-          category: "image" | "document" | "drawing";
+          category: "image" | "document" | "drawing" | "permit";
           created_at?: string;
         };
         Update: {
           file_name?: string;
-          category?: "image" | "document" | "drawing";
+          category?: "image" | "document" | "drawing" | "permit";
         };
         Relationships: [
           {

@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { Users, FileText, BarChart3 } from "lucide-react";
+import { Users, FileText, BarChart3, FolderOpen } from "lucide-react";
 
 export default async function AdminDashboardPage() {
   const supabase = await createClient();
@@ -40,7 +40,12 @@ export default async function AdminDashboardPage() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Link href="/admin/projects" className="bg-white rounded-xl p-6 border border-border hover:shadow-md hover:border-accent/30 transition-all">
+          <FolderOpen className="h-8 w-8 text-accent mb-3" />
+          <h3 className="font-semibold text-primary">Client Projects</h3>
+          <p className="text-sm text-text-muted mt-1">Review submitted projects and update status</p>
+        </Link>
         <Link href="/admin/users" className="bg-white rounded-xl p-6 border border-border hover:shadow-md hover:border-accent/30 transition-all">
           <Users className="h-8 w-8 text-accent mb-3" />
           <h3 className="font-semibold text-primary">User Management</h3>

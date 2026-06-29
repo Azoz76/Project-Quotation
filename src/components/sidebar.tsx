@@ -16,6 +16,7 @@ import {
   LogOut,
   Shield,
 } from "lucide-react";
+// FolderOpen is used both in navItems and in admin sidebar section
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -77,13 +78,25 @@ export function Sidebar({ role }: { role: string }) {
               href="/admin"
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                pathname.startsWith("/admin")
+                pathname === "/admin"
                   ? "bg-accent text-white"
                   : "text-white/70 hover:bg-white/10 hover:text-white"
               )}
             >
               <Shield className="h-5 w-5" />
               Admin Panel
+            </Link>
+            <Link
+              href="/admin/projects"
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                pathname === "/admin/projects"
+                  ? "bg-accent text-white"
+                  : "text-white/70 hover:bg-white/10 hover:text-white"
+              )}
+            >
+              <FolderOpen className="h-5 w-5" />
+              Client Projects
             </Link>
           </>
         )}

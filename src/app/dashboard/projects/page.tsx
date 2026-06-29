@@ -16,10 +16,20 @@ type Project = {
 
 const statusColors: Record<string, string> = {
   draft: "bg-surface-alt text-text-muted",
+  reviewing: "bg-blue-100 text-blue-700",
   quoted: "bg-accent/10 text-accent",
   accepted: "bg-green-100 text-green-700",
   in_progress: "bg-yellow-100 text-yellow-700",
   completed: "bg-primary/10 text-primary",
+};
+
+const statusLabels: Record<string, string> = {
+  draft: "Draft",
+  reviewing: "Reviewing for Pricing",
+  quoted: "Quoted",
+  accepted: "Accepted",
+  in_progress: "In Progress",
+  completed: "Completed",
 };
 
 export default function ProjectsPage() {
@@ -91,7 +101,7 @@ export default function ProjectsPage() {
                   <p className="mt-2 text-xs text-text-muted">{formatDate(project.created_at)}</p>
                 </div>
                 <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusColors[project.status] ?? ""}`}>
-                  {project.status.replace("_", " ")}
+                  {statusLabels[project.status] ?? project.status}
                 </span>
               </div>
             </Link>

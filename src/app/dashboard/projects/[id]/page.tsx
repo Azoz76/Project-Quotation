@@ -46,8 +46,21 @@ export default async function ProjectDetailPage({
           )}
           <p className="mt-1 text-sm text-text-muted">Created {formatDate(project.created_at)}</p>
         </div>
-        <span className="px-3 py-1 rounded-full text-sm font-medium bg-accent/10 text-accent">
-          {project.status.replace("_", " ")}
+        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+          project.status === "reviewing" ? "bg-blue-100 text-blue-700" :
+          project.status === "quoted" ? "bg-accent/10 text-accent" :
+          project.status === "accepted" ? "bg-green-100 text-green-700" :
+          project.status === "completed" ? "bg-primary/10 text-primary" :
+          "bg-surface-alt text-text-muted"
+        }`}>
+          {({
+            draft: "Draft",
+            reviewing: "Reviewing for Pricing",
+            quoted: "Quoted",
+            accepted: "Accepted",
+            in_progress: "In Progress",
+            completed: "Completed",
+          } as Record<string, string>)[project.status] ?? project.status}
         </span>
       </div>
 
