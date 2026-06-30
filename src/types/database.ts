@@ -55,6 +55,7 @@ export interface Database {
           location_lat: number | null;
           location_lng: number | null;
           location_address: string | null;
+          map_url: string | null;
           status: "draft" | "reviewing" | "quoted" | "accepted" | "in_progress" | "completed";
           created_at: string;
           updated_at: string;
@@ -67,6 +68,7 @@ export interface Database {
           location_lat?: number | null;
           location_lng?: number | null;
           location_address?: string | null;
+          map_url?: string | null;
           status?: "draft" | "reviewing" | "quoted" | "accepted" | "in_progress" | "completed";
           created_at?: string;
           updated_at?: string;
@@ -77,6 +79,7 @@ export interface Database {
           location_lat?: number | null;
           location_lng?: number | null;
           location_address?: string | null;
+          map_url?: string | null;
           status?: "draft" | "reviewing" | "quoted" | "accepted" | "in_progress" | "completed";
           updated_at?: string;
         };
@@ -144,6 +147,9 @@ export interface Database {
           materials: Json;
           total_cost: number;
           ai_analysis: string | null;
+          engineer_price: number | null;
+          estimated_completion: string | null;
+          bill_of_quantity: Json | null;
           status: "pending" | "generated" | "approved" | "rejected";
           created_at: string;
           updated_at: string;
@@ -155,6 +161,9 @@ export interface Database {
           materials?: Json;
           total_cost?: number;
           ai_analysis?: string | null;
+          engineer_price?: number | null;
+          estimated_completion?: string | null;
+          bill_of_quantity?: Json | null;
           status?: "pending" | "generated" | "approved" | "rejected";
           created_at?: string;
           updated_at?: string;
@@ -163,6 +172,9 @@ export interface Database {
           materials?: Json;
           total_cost?: number;
           ai_analysis?: string | null;
+          engineer_price?: number | null;
+          estimated_completion?: string | null;
+          bill_of_quantity?: Json | null;
           status?: "pending" | "generated" | "approved" | "rejected";
           updated_at?: string;
         };

@@ -26,6 +26,7 @@ export default function NewProjectPage() {
   const [documents, setDocuments] = useState<FileUpload[]>([]);
   const [saving, setSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [submitError, setSubmitError] = useState("");
   const router = useRouter();
 
   const drawingRef = useRef<HTMLInputElement>(null);
@@ -66,73 +67,72 @@ export default function NewProjectPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
+    setSubmitError("");
     setUploadProgress(0);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
 
-    const { data: project, error } = await supabase
-      .from("projects")
-      .insert({
-        user_id: user.id,
-        title,
-        description: description || null,
-        location_address: address || null,
-        location_lng: mapUrl ? 0 : null,
-        location_lat: mapUrl ? 0 : null,
-        status: "reviewing" as "draft",
-      })
-      .select("id")
-      .single();
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setSubmitError("You must be logged in."); setSaving(false); return; }
 
-    if (error || !project) {
-      setSaving(false);
-      return;
-    }
-
-    if (mapUrl) {
-      await supabase.from("projects").update({
-        description: [description, mapUrl ? `Map: ${mapUrl}` : ""].filter(Boolean).join("\n\n"),
-      }).eq("id", project.id);
-    }
-
-    const allFiles = [...drawings, ...permits, ...documents];
-    const total = allFiles.length;
-
-    for (let i = 0; i < allFiles.length; i++) {
-      const { file, category } = allFiles[i];
-      const path = `${user.id}/${project.id}/${Date.now()}-${file.name}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("uploads")
-        .upload(path, file);
-
-      if (!uploadError) {
-        const { data: { publicUrl } } = supabase.storage.from("uploads").getPublicUrl(path);
-
-        await supabase.from("uploads").insert({
-          project_id: project.id,
+      const { data: project, error } = await supabase
+        .from("projects")
+        .insert({
           user_id: user.id,
-          file_name: file.name,
-          file_type: file.type || "application/octet-stream",
-          file_size: file.size,
-          storage_path: path,
-          public_url: publicUrl,
-          category,
-        });
+          title,
+          description: description || null,
+          location_address: address || null,
+          map_url: mapUrl || null,
+          status: "reviewing" as "draft",
+        })
+        .select("id")
+        .single();
+
+      if (error || !project) {
+        setSubmitError(error?.message || "Failed to create project. Please try again.");
+        setSaving(false);
+        return;
       }
 
-      setUploadProgress(Math.round(((i + 1) / total) * 100));
+      const allFiles = [...drawings, ...permits, ...documents];
+      const total = allFiles.length;
+
+      for (let i = 0; i < allFiles.length; i++) {
+        const { file, category } = allFiles[i];
+        const path = `${user.id}/${project.id}/${Date.now()}-${file.name}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("uploads")
+          .upload(path, file);
+
+        if (!uploadError) {
+          const { data: { publicUrl } } = supabase.storage.from("uploads").getPublicUrl(path);
+          await supabase.from("uploads").insert({
+            project_id: project.id,
+            user_id: user.id,
+            file_name: file.name,
+            file_type: file.type || "application/octet-stream",
+            file_size: file.size,
+            storage_path: path,
+            public_url: publicUrl,
+            category,
+          });
+        }
+
+        setUploadProgress(Math.round(((i + 1) / total) * 100));
+      }
+
+      await supabase.from("notifications").insert({
+        user_id: user.id,
+        message: `Your project "${title}" has been submitted and is under review.`,
+        link: `/dashboard/projects/${project.id}`,
+      });
+
+      router.push("/dashboard/projects");
+    } catch (err: unknown) {
+      setSubmitError(err instanceof Error ? err.message : "An unexpected error occurred.");
+      setSaving(false);
     }
-
-    // Notify the client
-    await supabase.from("notifications").insert({
-      user_id: user.id,
-      message: `Your project "${title}" has been submitted and is under review.`,
-      link: `/dashboard/projects/${project.id}`,
-    });
-
-    router.push("/dashboard/projects");
   }
 
   return (
@@ -379,6 +379,11 @@ export default function NewProjectPage() {
         )}
 
         {/* Actions */}
+        {submitError && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            {submitError}
+          </div>
+        )}
         <div className="flex gap-3">
           <button
             type="submit"
