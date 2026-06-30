@@ -48,7 +48,7 @@ Include materials like: steel reinforcement, concrete, blocks/bricks, cement, sa
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "openai/gpt-oss-120b:free",
+        model: "google/gemma-4-31b-it:free",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
       }),

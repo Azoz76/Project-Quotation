@@ -7,7 +7,7 @@ import Link from "next/link";
 import {
   ChevronDown, ChevronUp, MapPin, ExternalLink, Share2,
   FileText, FileImage, CheckCircle, XCircle, Loader2,
-  DollarSign, Edit2, Check, X,
+  DollarSign, Edit2, Check, X, Sparkles,
 } from "lucide-react";
 
 type Upload = {
@@ -89,6 +89,7 @@ export default function AdminProjectsPage() {
   // AI pricing edit state per project
   const [aiEdit, setAiEdit] = useState<Record<string, { amount: string; analysis: string }>>({});
   const [editingAi, setEditingAi] = useState<string | null>(null);
+  const [generatingAi, setGeneratingAi] = useState<Set<string>>(new Set());
 
   useEffect(() => { load(); }, []);
 
@@ -179,6 +180,56 @@ export default function AdminProjectsPage() {
       },
     }));
     setEditingAi(project.id);
+  }
+
+  async function generateWithAi(project: Project) {
+    setGeneratingAi(prev => new Set(prev).add(project.id));
+    try {
+      const res = await fetch("/api/quotation/ai-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(`AI generation failed: ${data.error ?? "Unknown error"}`);
+        return;
+      }
+      // Save AI result to quotation immediately (status "generated" = pending admin review)
+      const supabase = createClient();
+      const q = project.quotations?.[0];
+      if (q) {
+        await supabase.from("quotations").update({
+          total_cost: data.total_cost,
+          ai_analysis: data.ai_analysis,
+          bill_of_quantity: data.bill_of_quantity ?? [],
+          status: "generated",
+        }).eq("id", q.id);
+      } else {
+        await supabase.from("quotations").insert({
+          project_id: project.id,
+          user_id: project.user_id,
+          total_cost: data.total_cost,
+          ai_analysis: data.ai_analysis,
+          bill_of_quantity: data.bill_of_quantity ?? [],
+          status: "generated",
+        });
+      }
+      await load();
+      // Open edit form pre-filled so admin can review before approving
+      setAiEdit(prev => ({
+        ...prev,
+        [project.id]: {
+          amount: String(data.total_cost ?? ""),
+          analysis: data.ai_analysis ?? "",
+        },
+      }));
+      setEditingAi(project.id);
+    } catch {
+      alert("AI generation failed. Check your OpenRouter API key.");
+    } finally {
+      setGeneratingAi(prev => { const n = new Set(prev); n.delete(project.id); return n; });
+    }
   }
 
   function toggleExpand(id: string) {
@@ -594,21 +645,33 @@ export default function AdminProjectsPage() {
                                         </div>
 
                                         {q.status !== "approved" && q.status !== "rejected" && (
-                                          <div className="flex gap-2">
+                                          <div className="space-y-2">
+                                            <div className="flex gap-2">
+                                              <button
+                                                onClick={() => approveAiPricing(p)}
+                                                disabled={isUpdating || generatingAi.has(p.id)}
+                                                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
+                                              >
+                                                {isUpdating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+                                                Approve & Send to Client
+                                              </button>
+                                              <button
+                                                onClick={() => rejectAiPricing(p)}
+                                                disabled={isUpdating || generatingAi.has(p.id)}
+                                                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 disabled:opacity-50 transition-colors"
+                                              >
+                                                <XCircle className="h-3.5 w-3.5" /> Reject
+                                              </button>
+                                            </div>
                                             <button
-                                              onClick={() => approveAiPricing(p)}
-                                              disabled={isUpdating}
-                                              className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
+                                              onClick={() => generateWithAi(p)}
+                                              disabled={generatingAi.has(p.id) || isUpdating}
+                                              className="w-full flex items-center justify-center gap-1.5 py-1.5 border border-accent/30 text-accent rounded-lg text-xs font-medium hover:bg-accent/5 disabled:opacity-50 transition-colors"
                                             >
-                                              {isUpdating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
-                                              Approve & Send to Client
-                                            </button>
-                                            <button
-                                              onClick={() => rejectAiPricing(p)}
-                                              disabled={isUpdating}
-                                              className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 disabled:opacity-50 transition-colors"
-                                            >
-                                              <XCircle className="h-3.5 w-3.5" /> Reject
+                                              {generatingAi.has(p.id)
+                                                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Reading documents…</>
+                                                : <><Sparkles className="h-3.5 w-3.5" /> Re-generate with AI</>
+                                              }
                                             </button>
                                           </div>
                                         )}
@@ -634,14 +697,25 @@ export default function AdminProjectsPage() {
                                         )}
                                       </>
                                     ) : (
-                                      <div className="text-center py-4">
+                                      <div className="text-center py-4 space-y-2">
                                         <DollarSign className="h-8 w-8 text-text-muted mx-auto mb-2" />
                                         <p className="text-xs text-text-muted mb-3">No AI pricing set yet</p>
                                         <button
-                                          onClick={() => startEditAi(p)}
-                                          className="inline-flex items-center gap-1.5 px-4 py-2 bg-accent text-white rounded-lg text-xs font-medium hover:bg-accent-hover"
+                                          onClick={() => generateWithAi(p)}
+                                          disabled={generatingAi.has(p.id) || isUpdating}
+                                          className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 bg-accent text-white rounded-lg text-xs font-semibold hover:bg-accent-hover disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
                                         >
-                                          <Edit2 className="h-3.5 w-3.5" /> Set AI Pricing
+                                          {generatingAi.has(p.id)
+                                            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Reading documents…</>
+                                            : <><Sparkles className="h-3.5 w-3.5" /> Generate with AI</>
+                                          }
+                                        </button>
+                                        <button
+                                          onClick={() => startEditAi(p)}
+                                          disabled={generatingAi.has(p.id)}
+                                          className="w-full flex items-center justify-center gap-1.5 px-4 py-2 border border-border rounded-lg text-xs font-medium text-text-muted hover:text-primary disabled:opacity-50"
+                                        >
+                                          <Edit2 className="h-3.5 w-3.5" /> Set Manually
                                         </button>
                                       </div>
                                     )}
