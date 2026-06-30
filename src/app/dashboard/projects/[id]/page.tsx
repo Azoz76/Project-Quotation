@@ -114,11 +114,13 @@ export default function ProjectDetailPage() {
   if (!project) return <div className="text-red-500">Project not found.</div>;
 
   const q = project.quotations?.[0] ?? null;
+  // Only expose pricing/BOQ when admin has approved
+  const approvedQ = q?.status === "approved" ? q : null;
   const drawings = project.uploads?.filter(u => u.category === "drawing") ?? [];
   const permits = project.uploads?.filter(u => u.category === "permit") ?? [];
   const docs = project.uploads?.filter(u => !["drawing", "permit"].includes(u.category)) ?? [];
-  const boqItems: BOQItem[] = Array.isArray(q?.bill_of_quantity) ? (q!.bill_of_quantity as BOQItem[]) : [];
-  const materialsItems: MaterialItem[] = Array.isArray(q?.materials) ? (q!.materials as MaterialItem[]) : [];
+  const boqItems: BOQItem[] = Array.isArray(approvedQ?.bill_of_quantity) ? (approvedQ!.bill_of_quantity as BOQItem[]) : [];
+  const materialsItems: MaterialItem[] = Array.isArray(approvedQ?.materials) ? (approvedQ!.materials as MaterialItem[]) : [];
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -142,9 +144,9 @@ export default function ProjectDetailPage() {
       {/* Pricing Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { icon: Cpu, label: "AI Pricing", value: q?.total_cost != null ? fmt(q.total_cost) : null, color: "text-primary" },
-          { icon: HardHat, label: "Engineer Pricing", value: q?.engineer_price != null ? fmt(q.engineer_price) : null, color: "text-green-700" },
-          { icon: Calendar, label: "Est. Completion", value: q?.estimated_completion ?? null, color: "text-primary" },
+          { icon: Cpu, label: "AI Pricing", value: approvedQ?.total_cost != null ? fmt(approvedQ.total_cost) : null, color: "text-primary" },
+          { icon: HardHat, label: "Engineer Pricing", value: approvedQ?.engineer_price != null ? fmt(approvedQ.engineer_price) : null, color: "text-green-700" },
+          { icon: Calendar, label: "Est. Completion", value: approvedQ?.estimated_completion ?? null, color: "text-primary" },
           { icon: ClipboardList, label: "Bill of Qty", value: boqItems.length > 0 ? `${boqItems.length} items` : null, color: "text-primary" },
         ].map(({ icon: Icon, label, value, color }) => (
           <div key={label} className="bg-white rounded-xl border border-border p-4">
@@ -187,14 +189,14 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
-      {/* AI Analysis */}
-      {q?.ai_analysis && (
+      {/* AI Analysis — only visible after admin approval */}
+      {approvedQ?.ai_analysis && (
         <div className="bg-white rounded-xl border border-border p-6 space-y-3">
           <div className="flex items-center gap-2">
             <Cpu className="h-5 w-5 text-accent" />
             <h2 className="text-base font-semibold text-primary">AI Analysis</h2>
           </div>
-          <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{q.ai_analysis}</p>
+          <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{approvedQ.ai_analysis}</p>
         </div>
       )}
 

@@ -126,7 +126,8 @@ export default function ProjectsPage() {
               <tbody className="divide-y divide-border">
                 {projects.map((p) => {
                   const q = p.quotations?.[0] ?? null;
-                  const hasBOQ = q && q.bill_of_quantity != null;
+                  const approvedQ = q?.status === "approved" ? q : null;
+                  const hasBOQ = approvedQ && approvedQ.bill_of_quantity != null;
                   return (
                     <tr key={p.id} className="hover:bg-surface/50 transition-colors">
                       {/* Project */}
@@ -168,8 +169,8 @@ export default function ProjectsPage() {
 
                       {/* AI Pricing */}
                       <td className="px-5 py-4">
-                        {q && q.total_cost != null ? (
-                          <span className="font-semibold text-primary">{fmt(q.total_cost)}</span>
+                        {approvedQ && approvedQ.total_cost != null ? (
+                          <span className="font-semibold text-primary">{fmt(approvedQ.total_cost)}</span>
                         ) : (
                           <span className="text-xs text-text-muted italic">Pending</span>
                         )}
@@ -177,8 +178,8 @@ export default function ProjectsPage() {
 
                       {/* Engineer Pricing */}
                       <td className="px-5 py-4">
-                        {q && q.engineer_price != null ? (
-                          <span className="font-semibold text-green-700">{fmt(q.engineer_price)}</span>
+                        {approvedQ && approvedQ.engineer_price != null ? (
+                          <span className="font-semibold text-green-700">{fmt(approvedQ.engineer_price)}</span>
                         ) : (
                           <span className="text-xs text-text-muted italic">Pending</span>
                         )}
@@ -186,7 +187,7 @@ export default function ProjectsPage() {
 
                       {/* Estimated Completion */}
                       <td className="px-5 py-4 text-xs text-foreground whitespace-nowrap">
-                        {q?.estimated_completion ?? <span className="text-text-muted italic">Pending</span>}
+                        {approvedQ?.estimated_completion ?? <span className="text-text-muted italic">Pending</span>}
                       </td>
 
                       {/* Bill of Quantity */}
