@@ -28,7 +28,7 @@ function ResetPasswordForm() {
       const code = searchParams.get("code");
 
       if (token_hash && type) {
-        // Newer Supabase OTP email flow: token_hash is in the URL directly
+        // OTP / token-hash flow: verify directly on the page
         const { error } = await supabase.auth.verifyOtp({
           token_hash,
           type: type as "recovery" | "signup" | "invite" | "magiclink" | "email_change",
@@ -39,15 +39,14 @@ function ResetPasswordForm() {
           return;
         }
       } else if (code) {
-        // PKCE code flow: Supabase verify endpoint redirected here with a code
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) {
-          setStatus("error");
-          setErrorMsg("This reset link has expired or has already been used. Please request a new one.");
-          return;
-        }
+        // PKCE code arrived directly at this page — the server-side callback
+        // (/auth/callback) should have handled this and stripped the code before
+        // redirecting here. Redirect back to the callback so it can do the
+        // server-side exchange (the PKCE verifier lives in cookies, not JS).
+        window.location.href = `/auth/callback?type=recovery&code=${code}`;
+        return;
       } else {
-        // Session was already established by the /auth/callback route
+        // No token params — session was already established by /auth/callback.
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
           setStatus("error");
