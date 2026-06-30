@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
@@ -283,9 +283,9 @@ export default function AdminProjectsPage() {
                     : "pending";
 
                   return (
-                    <>
+                    <React.Fragment key={p.id}>
                       {/* Main row */}
-                      <tr key={p.id} className="border-b border-surface-alt hover:bg-surface/30 transition-colors">
+                      <tr className="border-b border-surface-alt hover:bg-surface/30 transition-colors">
                         {/* Project title */}
                         <td className="px-5 py-3">
                           <Link href={`/dashboard/projects/${p.id}`}
@@ -653,7 +653,7 @@ export default function AdminProjectsPage() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   );
                 })
               )}
