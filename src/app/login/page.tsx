@@ -33,25 +33,37 @@ export default function LoginPage() {
     if (!signupValid) return;
     setStatus("loading");
     setErrorMsg("");
-    const supabase = createClient();
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName.trim(),
-          contact_number: contactNumber.trim(),
-        },
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
-      },
+    // Use admin signup route — creates user with email auto-confirmed,
+    // so no confirmation email is sent (avoids Supabase email rate limit).
+    const res = await fetch("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        password,
+        full_name: fullName.trim(),
+        contact_number: contactNumber.trim(),
+      }),
     });
 
-    if (error) {
+    const json = await res.json();
+
+    if (!res.ok) {
       setStatus("error");
-      setErrorMsg(error.message);
+      setErrorMsg(json.error ?? "Sign up failed. Please try again.");
+      return;
+    }
+
+    // User is already confirmed — sign them in immediately
+    const supabase = createClient();
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (signInError) {
+      setStatus("error");
+      setErrorMsg(signInError.message);
     } else {
-      setStatus("sent");
+      window.location.href = "/dashboard";
     }
   }
 
