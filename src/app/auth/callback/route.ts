@@ -36,7 +36,7 @@ export async function GET(request: Request) {
     });
     if (!error) {
       if (type === "recovery") {
-        return NextResponse.redirect(`${origin}/reset-password`);
+        return NextResponse.redirect(`${origin}/login?reset=1`);
       }
       return NextResponse.redirect(`${origin}${next}`);
     }
@@ -56,7 +56,9 @@ export async function GET(request: Request) {
           : false);
 
       if (isRecovery) {
-        return NextResponse.redirect(`${origin}/reset-password`);
+        // Redirect back to login page with ?reset=1 so the user sees the
+        // "Check your email" view with the "Enter New Password" button enabled.
+        return NextResponse.redirect(`${origin}/login?reset=1`);
       }
       return NextResponse.redirect(`${origin}${next}`);
     }

@@ -85,9 +85,11 @@ function ResetPasswordForm() {
   return (
     <div className="w-full max-w-md p-8 bg-white rounded-2xl shadow-2xl">
       <div className="text-center mb-8">
-        <img src="/logo.jpg" alt="Towers Purebred Co." className="mx-auto h-20 w-auto mb-2" />
-        <h1 className="text-2xl font-bold text-primary">Reset Your Password</h1>
-        <p className="mt-2 text-text-muted">Enter a new password for your account</p>
+        <div className="px-4">
+          <img src="/logo.jpg" alt="Towers Purebred Co." className="w-full h-auto object-contain" />
+        </div>
+        <h1 className="mt-4 text-xl font-bold text-primary">Set New Password</h1>
+        <p className="mt-1 text-text-muted text-sm">Enter and confirm your new password below</p>
       </div>
 
       {status === "verifying" && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { HardHat, Shield, Eye, EyeOff, Check } from "lucide-react";
@@ -21,6 +21,7 @@ export default function LoginPage() {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [status, setStatus] = useState<"idle" | "loading" | "sent" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const [resetVerified, setResetVerified] = useState(false);
 
   const hasMinLength = password.length >= 8;
   const hasUppercase = /[A-Z]/.test(password);
@@ -105,6 +106,19 @@ export default function LoginPage() {
     }
   }
 
+  // Detect when the user returns from clicking the recovery email link
+  // (/auth/callback redirects to /login?reset=1 after verifying the session)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("reset") === "1") {
+      setResetVerified(true);
+      setAuthMode("forgot");
+      setStatus("sent");
+      // Clean the URL so a refresh doesn't re-trigger
+      window.history.replaceState({}, "", "/login");
+    }
+  }, []);
+
   function resetForm() {
     setEmail("");
     setPassword("");
@@ -183,25 +197,76 @@ export default function LoginPage() {
 
         {status === "sent" ? (
           <div className="text-center p-6 bg-green-50 rounded-xl">
-            <svg className="mx-auto h-12 w-12 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-            <h2 className="mt-4 text-lg font-semibold text-green-800">Check your email</h2>
-            <p className="mt-2 text-green-700">
-              We sent a {authMode === "forgot" ? "password reset" : "confirmation"} link to <strong>{email}</strong>
-            </p>
-            <p className="mt-1 text-sm text-green-600">
-              {authMode === "forgot"
-                ? "Click the link to reset your password."
-                : "Click the link to verify your account and start using the app."
-              }
-            </p>
-            <button
-              onClick={() => { resetForm(); setAuthMode("login"); }}
-              className="mt-4 text-sm text-accent hover:text-accent-hover underline"
-            >
-              Back to Log In
-            </button>
+            {resetVerified ? (
+              /* State 2: user clicked email link → session established → redirected back */
+              <>
+                <div className="mx-auto h-14 w-14 rounded-full bg-green-100 flex items-center justify-center">
+                  <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <h2 className="mt-4 text-lg font-semibold text-green-800">Email Verified!</h2>
+                <p className="mt-2 text-sm text-green-700">
+                  Your identity has been confirmed. You can now set your new password.
+                </p>
+                <button
+                  onClick={() => { window.location.href = "/reset-password"; }}
+                  className="mt-5 w-full py-3 px-4 bg-accent text-white font-semibold rounded-lg hover:bg-accent-hover transition-colors"
+                >
+                  Enter New Password
+                </button>
+              </>
+            ) : authMode === "forgot" ? (
+              /* State 1: reset email sent, waiting for user to click link */
+              <>
+                <svg className="mx-auto h-12 w-12 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <h2 className="mt-4 text-lg font-semibold text-green-800">Check your email</h2>
+                <p className="mt-2 text-green-700 text-sm">
+                  We sent a password reset link to <strong>{email}</strong>
+                </p>
+                <p className="mt-1 text-sm text-green-600">
+                  Click the link in your email — then the button below will activate.
+                </p>
+                <button
+                  disabled
+                  className="mt-5 w-full py-3 px-4 bg-gray-200 text-gray-400 font-semibold rounded-lg cursor-not-allowed select-none"
+                >
+                  Enter New Password
+                </button>
+                <p className="mt-2 text-xs text-green-600 italic">Waiting for you to click the email link…</p>
+              </>
+            ) : (
+              /* Signup confirmation email */
+              <>
+                <svg className="mx-auto h-12 w-12 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <h2 className="mt-4 text-lg font-semibold text-green-800">Check your email</h2>
+                <p className="mt-2 text-sm text-green-700">
+                  We sent a confirmation link to <strong>{email}</strong>
+                </p>
+                <p className="mt-1 text-sm text-green-600">
+                  Click the link to verify your account and start using the app.
+                </p>
+                <button
+                  onClick={() => { resetForm(); setAuthMode("login"); }}
+                  className="mt-4 text-sm text-accent hover:text-accent-hover underline"
+                >
+                  Back to Log In
+                </button>
+              </>
+            )}
+            {/* Always show a back link for forgot/reset states */}
+            {authMode === "forgot" && (
+              <button
+                onClick={() => { setResetVerified(false); resetForm(); setAuthMode("login"); }}
+                className="mt-3 block w-full text-sm text-text-muted hover:text-foreground underline"
+              >
+                Back to Log In
+              </button>
+            )}
           </div>
 
         ) : authMode === "login" ? (
