@@ -32,6 +32,9 @@ export default function ResetPasswordPage() {
       setErrorMsg(error.message);
     } else {
       setStatus("success");
+      // Sign out the recovery session so the middleware doesn't bounce
+      // the user from /login back to /dashboard
+      await supabase.auth.signOut();
       setTimeout(() => {
         window.location.href = "/login";
       }, 2000);
