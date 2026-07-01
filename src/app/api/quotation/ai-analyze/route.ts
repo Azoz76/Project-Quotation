@@ -16,33 +16,66 @@ const HEADERS_BASE = {
   "X-Title": "Project Quotation AI",
 };
 
-// Free vision-capable models, tried in order
+// Vision-capable free models (tried in order)
 const VISION_MODELS = [
   "google/gemma-4-31b-it:free",
   "meta-llama/llama-3.2-11b-vision-instruct:free",
+  "google/gemma-3-12b-it:free",
 ];
 
-// Free text models for synthesis, tried in order
-const SYNTHESIS_MODELS = [
-  "deepseek/deepseek-r1:free",
+// Absolute last-resort text models if the live fetch fails
+const EMERGENCY_TEXT_MODELS = [
   "meta-llama/llama-3.3-70b-instruct:free",
-  "qwen/qwen-2.5-72b-instruct:free",
-  "meta-llama/llama-3.1-8b-instruct:free",
-  "mistralai/mistral-7b-instruct:free",
+  "google/gemma-2-9b-it:free",
+  "meta-llama/llama-3.2-3b-instruct:free",
 ];
+
+type ORModel = {
+  id: string;
+  context_length?: number;
+  pricing?: { prompt?: string; completion?: string };
+  architecture?: { modality?: string; tokenizer?: string };
+};
+
+// Fetch the live list of free text models from OpenRouter, sorted best-first
+async function fetchLiveFreeModels(apiKey: string): Promise<string[]> {
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      // Next.js caches this for 3 minutes so we don't hammer the endpoint
+      next: { revalidate: 180 },
+    });
+    if (!res.ok) return EMERGENCY_TEXT_MODELS;
+    const { data } = await res.json() as { data: ORModel[] };
+
+    return (data ?? [])
+      .filter(m =>
+        m.id.endsWith(":free") &&
+        String(m.pricing?.prompt ?? "1") === "0" &&
+        // skip image-generation-only models
+        !(m.architecture?.modality ?? "").startsWith("image->image")
+      )
+      .sort((a, b) => (b.context_length ?? 0) - (a.context_length ?? 0))
+      .map(m => m.id)
+      .slice(0, 20);
+  } catch {
+    return EMERGENCY_TEXT_MODELS;
+  }
+}
 
 function extractJson(text: string) {
   const stripped = text.replace(/```(?:json)?\s*/gi, "").replace(/```/g, "").trim();
   const match = stripped.match(/\{[\s\S]*\}/);
   if (!match) return null;
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(match[0]); } catch { return null; }
 }
 
-async function callOpenRouter(apiKey: string, model: string, messages: object[], maxTokens = 4096): Promise<string> {
+async function callOpenRouter(
+  apiKey: string,
+  model: string,
+  messages: object[],
+  maxTokens = 4096,
+): Promise<string> {
   const res = await fetch(OPENROUTER_BASE, {
     method: "POST",
     headers: { ...HEADERS_BASE, Authorization: `Bearer ${apiKey}` },
@@ -50,28 +83,37 @@ async function callOpenRouter(apiKey: string, model: string, messages: object[],
   });
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`OpenRouter [${model}] error: ${err}`);
+    throw new Error(`OpenRouter [${model}] ${res.status}: ${err}`);
   }
   const data = await res.json();
   return (data.choices?.[0]?.message?.content ?? "") as string;
 }
 
-// Try each model in the list; skip on 429 / unavailable errors
-async function callWithFallback(apiKey: string, models: string[], messages: object[], maxTokens = 4096): Promise<string> {
+// Try each model; skip on 4xx/5xx that signal unavailability or rate-limiting
+async function callWithFallback(
+  apiKey: string,
+  models: string[],
+  messages: object[],
+  maxTokens = 4096,
+): Promise<string> {
   const errors: string[] = [];
   for (const model of models) {
     try {
-      return await callOpenRouter(apiKey, model, messages, maxTokens);
+      const result = await callOpenRouter(apiKey, model, messages, maxTokens);
+      if (result.trim()) return result;
+      errors.push(`[${model}]: empty response`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      errors.push(`[${model}]: ${msg}`);
-      // Only skip to next model on rate-limit or unavailability errors
-      const isRetryable = msg.includes("429") || msg.includes("402") ||
-        msg.includes("rate") || msg.includes("unavailable") || msg.includes("free");
-      if (!isRetryable) throw e;
+      errors.push(msg);
+      // Only continue to next model if it's a transient/availability error
+      const skip =
+        msg.includes("429") || msg.includes("402") || msg.includes("404") ||
+        msg.includes("rate") || msg.includes("unavailable") ||
+        msg.includes("No endpoints") || msg.includes("free");
+      if (!skip) throw e;
     }
   }
-  throw new Error(`All models failed:\n${errors.join("\n")}`);
+  throw new Error(`All models failed:\n${errors.slice(0, 5).join("\n")}`);
 }
 
 export async function POST(request: Request) {
@@ -85,7 +127,6 @@ export async function POST(request: Request) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "OPENROUTER_API_KEY not configured" }, { status: 500 });
 
-  // Fetch project details
   const { data: project } = await supabase
     .from("projects")
     .select("title, description, location_address")
@@ -93,7 +134,6 @@ export async function POST(request: Request) {
     .single();
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  // Fetch all uploads
   const { data: uploads } = await supabase
     .from("uploads")
     .select("file_name, file_type, public_url, category")
@@ -101,10 +141,10 @@ export async function POST(request: Request) {
 
   const allUploads = uploads ?? [];
   const imageUploads = allUploads.filter(u => IMAGE_TYPES.has((u.file_type ?? "").toLowerCase()));
-  const docUploads = allUploads.filter(u => !IMAGE_TYPES.has((u.file_type ?? "").toLowerCase()));
+  const docUploads   = allUploads.filter(u => !IMAGE_TYPES.has((u.file_type ?? "").toLowerCase()));
 
   try {
-    // ── STEP 1: Vision model — extract raw information from drawings ──────────
+    // ── STEP 1: Vision — extract info from drawing images ─────────────────────
     let extractedInfo = "No image drawings uploaded. Use project description and document names only.";
 
     if (imageUploads.length > 0) {
@@ -123,7 +163,7 @@ Extract and list ALL visible information:
 - Roof type and area
 - Any notes, legends, or annotations on the drawings
 
-Be as specific and detailed as possible. List every measurable quantity you can read from the drawings.`,
+Be as specific and detailed as possible.`,
         },
         ...imageUploads.map((u): ImagePart => ({
           type: "image_url",
@@ -139,7 +179,11 @@ Be as specific and detailed as possible. List every measurable quantity you can 
       );
     }
 
-    // ── STEP 2: Text model — produce professional quotation from extraction ───
+    // ── STEP 2: Text synthesis — generate professional BOQ ────────────────────
+    // Fetch the live list of available free models dynamically
+    const liveModels = await fetchLiveFreeModels(apiKey);
+    const synthesisModels = liveModels.length > 0 ? liveModels : EMERGENCY_TEXT_MODELS;
+
     const synthesisPrompt = `You are a senior construction quantity surveyor in Saudi Arabia. Based on the project details and drawing analysis below, produce a complete professional construction quotation.
 
 PROJECT DETAILS:
@@ -160,16 +204,16 @@ INSTRUCTIONS:
 
 Respond ONLY with a valid JSON object — no markdown, no text outside the JSON:
 {
-  "analysis": "Professional summary: project scope, key observations from drawings, construction approach, and notable specifications",
-  "total_cost": <sum of all BOQ totals as a number in SAR>,
+  "analysis": "Professional summary of project scope, key observations, and construction approach",
+  "total_cost": <number in SAR>,
   "bill_of_quantity": [
-    { "item": "Description", "qty": <number>, "unit": "m²/m³/kg/pcs/lm/etc", "unit_price": <SAR number>, "total": <SAR number> }
+    { "item": "Description", "qty": <number>, "unit": "m²/m³/kg/pcs/lm", "unit_price": <SAR>, "total": <SAR> }
   ]
 }`;
 
     const synthesisRaw = await callWithFallback(
       apiKey,
-      SYNTHESIS_MODELS,
+      synthesisModels,
       [{ role: "user", content: synthesisPrompt }],
       4096,
     );
@@ -177,20 +221,19 @@ Respond ONLY with a valid JSON object — no markdown, no text outside the JSON:
     const parsed = extractJson(synthesisRaw);
     if (!parsed) {
       return NextResponse.json(
-        { error: "Could not parse quotation response as JSON", raw: synthesisRaw },
+        { error: "Could not parse quotation response as JSON", raw: synthesisRaw.slice(0, 500) },
         { status: 500 },
       );
     }
 
-    // Recompute total_cost from BOQ to ensure consistency
     const boq: Array<{ item: string; qty: number; unit: string; unit_price: number; total: number }> =
       Array.isArray(parsed.bill_of_quantity) ? parsed.bill_of_quantity : [];
     const computedTotal = boq.reduce((s, r) => s + (Number(r.total) || 0), 0);
-    const finalTotal = computedTotal > 0 ? computedTotal : (typeof parsed.total_cost === "number" ? parsed.total_cost : 0);
+    const finalTotal = computedTotal > 0 ? computedTotal : (Number(parsed.total_cost) || 0);
 
     return NextResponse.json({
       total_cost: finalTotal,
-      ai_analysis: typeof parsed.analysis === "string" ? parsed.analysis : synthesisRaw,
+      ai_analysis: typeof parsed.analysis === "string" ? parsed.analysis : synthesisRaw.slice(0, 1000),
       bill_of_quantity: boq,
       drawing_extraction: extractedInfo,
     });
