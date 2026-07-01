@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { HardHat, Shield, Eye, EyeOff, Check } from "lucide-react";
@@ -11,7 +10,6 @@ type UserType = "client" | "admin";
 type AuthMode = "signup" | "login" | "forgot";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [userType, setUserType] = useState<UserType>("client");
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
@@ -72,8 +70,7 @@ export default function LoginPage() {
       setStatus("error");
       setErrorMsg(signInError.message);
     } else {
-      router.push("/dashboard");
-      router.refresh();
+      window.location.href = "/dashboard";
     }
   }
 
@@ -118,8 +115,7 @@ export default function LoginPage() {
       setErrorMsg(error.message || "Invalid email or password. Please try again.");
     } else {
       const redirectPath = userType === "admin" ? "/admin" : "/dashboard";
-      router.push(redirectPath);
-      router.refresh();
+      window.location.href = redirectPath;
     }
   }
 
