@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { HardHat, Shield, Eye, EyeOff, Check } from "lucide-react";
@@ -10,6 +11,7 @@ type UserType = "client" | "admin";
 type AuthMode = "signup" | "login" | "forgot";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [userType, setUserType] = useState<UserType>("client");
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
@@ -58,13 +60,20 @@ export default function LoginPage() {
 
     // User is already confirmed — sign them in immediately
     const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+      setTimeout(() => resolve({ data: null, error: new Error("Sign in timed out. Please try logging in.") }), 15000)
+    );
+    const { error: signInError } = await Promise.race([
+      supabase.auth.signInWithPassword({ email, password }),
+      timeoutPromise,
+    ]);
 
     if (signInError) {
       setStatus("error");
       setErrorMsg(signInError.message);
     } else {
-      window.location.href = "/dashboard";
+      router.push("/dashboard");
+      router.refresh();
     }
   }
 
@@ -92,17 +101,25 @@ export default function LoginPage() {
     setErrorMsg("");
     const supabase = createClient();
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+      setTimeout(() => resolve({
+        data: null,
+        error: new Error("Connection timed out. Please check your internet and try again."),
+      }), 15000)
+    );
+
+    const { error } = await Promise.race([
+      supabase.auth.signInWithPassword({ email, password }),
+      timeoutPromise,
+    ]);
 
     if (error) {
       setStatus("error");
       setErrorMsg(error.message || "Invalid email or password. Please try again.");
     } else {
       const redirectPath = userType === "admin" ? "/admin" : "/dashboard";
-      window.location.href = redirectPath;
+      router.push(redirectPath);
+      router.refresh();
     }
   }
 

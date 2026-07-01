@@ -54,7 +54,9 @@ export async function updateSession(request: NextRequest) {
   if (!user && !isPublicPage && !isPasswordPage) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    return NextResponse.redirect(url);
+    const loginRedirect = NextResponse.redirect(url);
+    loginRedirect.cookies.delete("x_user_role");
+    return loginRedirect;
   }
 
   // Logged in on /login — redirect to dashboard (but NOT password pages,
@@ -66,18 +68,29 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Admin check
+  // Admin check — cache role in a short-lived cookie to avoid a DB query on every request
   if (isAdminPage && user) {
-    const { data: profile } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", user.id)
-      .single();
+    const cachedRole = request.cookies.get("x_user_role")?.value;
+    if (cachedRole !== "admin") {
+      const { data: profile } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .single();
 
-    if (profile?.role !== "admin") {
-      const url = request.nextUrl.clone();
-      url.pathname = "/dashboard";
-      return NextResponse.redirect(url);
+      if (profile?.role !== "admin") {
+        const url = request.nextUrl.clone();
+        url.pathname = "/dashboard";
+        return NextResponse.redirect(url);
+      }
+
+      supabaseResponse.cookies.set("x_user_role", "admin", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 300, // 5 minutes
+        path: "/",
+      });
     }
   }
 
