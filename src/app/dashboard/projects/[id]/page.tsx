@@ -150,7 +150,8 @@ export default function ProjectDetailPage() {
     const errors: string[] = [];
 
     for (const file of files) {
-      const path = `${user.id}/${id}/${Date.now()}-${file.name}`;
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${user.id}/${id}/${Date.now()}-${safeName}`;
       const { error: storageError } = await supabase.storage.from("uploads").upload(path, file);
       if (storageError) {
         errors.push(`${file.name}: ${storageError.message}`);

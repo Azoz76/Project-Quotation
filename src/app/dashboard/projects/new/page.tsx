@@ -108,7 +108,8 @@ export default function NewProjectPage() {
 
       for (let i = 0; i < allFiles.length; i++) {
         const { file, category } = allFiles[i];
-        const path = `${user.id}/${project.id}/${Date.now()}-${file.name}`;
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `${user.id}/${project.id}/${Date.now()}-${safeName}`;
 
         const { error: uploadError } = await supabase.storage
           .from("uploads")
