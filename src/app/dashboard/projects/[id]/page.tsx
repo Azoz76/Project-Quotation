@@ -9,7 +9,7 @@ import {
   ArrowLeft, MapPin, FileText, FileImage, Calendar,
   DollarSign, ClipboardList, Cpu, HardHat, ExternalLink,
   Upload, ChevronDown, ChevronUp, Loader2, Trash2,
-  RefreshCw, SendHorizonal, Sparkles, CheckCircle2,
+  RefreshCw, SendHorizonal, Sparkles, CheckCircle2, Download,
 } from "lucide-react";
 
 type UploadRecord = {
@@ -110,6 +110,9 @@ export default function ProjectDetailPage() {
   const [generatingAi, setGeneratingAi] = useState(false);
   const [approvingAi, setApprovingAi]   = useState(false);
   const [aiError, setAiError]           = useState("");
+
+  // BOQ collapse
+  const [showBOQ, setShowBOQ] = useState(true);
 
   // Submit to admin
   const [submitting, setSubmitting] = useState(false);
@@ -355,6 +358,33 @@ export default function ProjectDetailPage() {
     await load();
   }
 
+  // ── Download BOQ as Excel-compatible CSV ─────────────────────────────────────
+  function downloadBOQ() {
+    if (!project || boqItems.length === 0) return;
+    const grandTotal = boqItems.reduce((s, i) => s + i.total, 0);
+    const rows: (string | number)[][] = [
+      [`Bill of Quantity — ${project.title}`],
+      [`Location: ${project.location_address ?? ""}`, "", "", "", ""],
+      [`Generated: ${new Date().toLocaleDateString("en-GB")}`],
+      [],
+      ["Item", "Qty", "Unit", "Unit Price (KWD)", "Total (KWD)"],
+      ...boqItems.map(r => [r.item, r.qty, r.unit, r.unit_price, r.total]),
+      [],
+      ["Grand Total", "", "", "", grandTotal],
+    ];
+    const csv = rows
+      .map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\r\n");
+    // BOM ensures Excel opens UTF-8 correctly (handles Arabic text)
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `BOQ-${project.title.replace(/[^a-zA-Z0-9]/g, "_")}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   if (loading) return <div className="text-text-muted">Loading project...</div>;
   if (!project) return <div className="text-red-500">Project not found.</div>;
 
@@ -516,42 +546,64 @@ export default function ProjectDetailPage() {
       {/* Bill of Quantity */}
       {boqItems.length > 0 && (
         <div className="bg-white rounded-xl border border-border overflow-hidden">
+          {/* Header row */}
           <div className="px-6 py-4 border-b border-border flex items-center gap-2">
-            <ClipboardList className="h-5 w-5 text-accent" />
-            <h2 className="text-base font-semibold text-primary">Bill of Quantity</h2>
+            <ClipboardList className="h-5 w-5 text-accent shrink-0" />
+            <h2 className="text-base font-semibold text-primary flex-1">Bill of Quantity</h2>
+            <span className="text-xs text-text-muted mr-2">{boqItems.length} items</span>
+            {/* Download Excel */}
+            <button
+              onClick={downloadBOQ}
+              title="Download as Excel (CSV)"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Excel
+            </button>
+            {/* Collapse / Expand */}
+            <button
+              onClick={() => setShowBOQ(v => !v)}
+              title={showBOQ ? "Collapse" : "Expand"}
+              className="p-1.5 rounded-lg text-text-muted hover:text-primary hover:bg-surface transition-colors"
+            >
+              {showBOQ ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-surface">
-                <tr>
-                  <th className="text-left px-5 py-3 font-medium text-text-muted">Item</th>
-                  <th className="text-right px-5 py-3 font-medium text-text-muted">Qty</th>
-                  <th className="text-left px-5 py-3 font-medium text-text-muted">Unit</th>
-                  <th className="text-right px-5 py-3 font-medium text-text-muted">Unit Price</th>
-                  <th className="text-right px-5 py-3 font-medium text-text-muted">Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {boqItems.map((item, i) => (
-                  <tr key={i} className="hover:bg-surface/50">
-                    <td className="px-5 py-3">{item.item}</td>
-                    <td className="px-5 py-3 text-right">{item.qty}</td>
-                    <td className="px-5 py-3 text-text-muted">{item.unit}</td>
-                    <td className="px-5 py-3 text-right">{fmt(item.unit_price)}</td>
-                    <td className="px-5 py-3 text-right font-semibold text-primary">{fmt(item.total)}</td>
+          {/* Collapsible table */}
+          {showBOQ && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-surface">
+                  <tr>
+                    <th className="text-left px-5 py-3 font-medium text-text-muted">Item</th>
+                    <th className="text-right px-5 py-3 font-medium text-text-muted">Qty</th>
+                    <th className="text-left px-5 py-3 font-medium text-text-muted">Unit</th>
+                    <th className="text-right px-5 py-3 font-medium text-text-muted">Unit Price</th>
+                    <th className="text-right px-5 py-3 font-medium text-text-muted">Total</th>
                   </tr>
-                ))}
-              </tbody>
-              <tfoot className="bg-surface border-t-2 border-border">
-                <tr>
-                  <td colSpan={4} className="px-5 py-3 font-semibold text-right text-primary">Grand Total</td>
-                  <td className="px-5 py-3 font-bold text-right text-primary text-base">
-                    {fmt(boqItems.reduce((s, i) => s + i.total, 0))}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {boqItems.map((item, i) => (
+                    <tr key={i} className="hover:bg-surface/50">
+                      <td className="px-5 py-3">{item.item}</td>
+                      <td className="px-5 py-3 text-right">{item.qty}</td>
+                      <td className="px-5 py-3 text-text-muted">{item.unit}</td>
+                      <td className="px-5 py-3 text-right">{fmt(item.unit_price)}</td>
+                      <td className="px-5 py-3 text-right font-semibold text-primary">{fmt(item.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-surface border-t-2 border-border">
+                  <tr>
+                    <td colSpan={4} className="px-5 py-3 font-semibold text-right text-primary">Grand Total</td>
+                    <td className="px-5 py-3 font-bold text-right text-primary text-base">
+                      {fmt(boqItems.reduce((s, i) => s + i.total, 0))}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
