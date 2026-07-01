@@ -63,11 +63,39 @@ async function fetchLiveFreeModels(apiKey: string): Promise<string[]> {
   }
 }
 
-function extractJson(text: string) {
-  const stripped = text.replace(/```(?:json)?\s*/gi, "").replace(/```/g, "").trim();
-  const match = stripped.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  try { return JSON.parse(match[0]); } catch { return null; }
+function extractJson(raw: string): Record<string, unknown> | null {
+  // 1. Strip DeepSeek / reasoning <think>...</think> blocks
+  let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
+  // 2. Strip markdown fences
+  text = text.replace(/```(?:json)?\s*/gi, "").replace(/```/g, "").trim();
+
+  // 3. Try parsing the whole cleaned text
+  try { return JSON.parse(text) as Record<string, unknown>; } catch { /* continue */ }
+
+  // 4. Find the outermost { ... } block and parse that
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) {
+    try { return JSON.parse(match[0]) as Record<string, unknown>; } catch { /* continue */ }
+
+    // 5. Attempt common JSON repairs on the matched block
+    try {
+      const fixed = match[0]
+        .replace(/,\s*([}\]])/g, "$1")               // trailing commas
+        .replace(/([{,]\s*)(\w[\w\s]*)(\s*):/g, (_, pre, key, sp) =>
+          `${pre}"${key.trim()}"${sp}:`)              // unquoted keys
+        .replace(/:\s*'([^']*)'/g, ': "$1"');         // single-quoted values
+      return JSON.parse(fixed) as Record<string, unknown>;
+    } catch { /* continue */ }
+  }
+
+  // 6. Last resort: build a minimal valid response from raw text
+  // so the admin still gets the analysis even without BOQ
+  return {
+    analysis: raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim().slice(0, 3000),
+    total_cost: 0,
+    bill_of_quantity: [],
+  };
 }
 
 async function callOpenRouter(
@@ -79,7 +107,13 @@ async function callOpenRouter(
   const res = await fetch(OPENROUTER_BASE, {
     method: "POST",
     headers: { ...HEADERS_BASE, Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
+    body: JSON.stringify({
+      model,
+      messages,
+      max_tokens: maxTokens,
+      // Suppress chain-of-thought / thinking tokens (DeepSeek R1, QwQ, etc.)
+      reasoning: { effort: "low" },
+    }),
   });
   if (!res.ok) {
     const err = await res.text();
@@ -202,12 +236,13 @@ INSTRUCTIONS:
 4. Each BOQ item must have realistic qty, unit, unit_price, and total (total = qty × unit_price)
 5. The grand total_cost must equal the sum of all BOQ item totals
 
-Respond ONLY with a valid JSON object — no markdown, no text outside the JSON:
+OUTPUT FORMAT: Reply with ONLY a raw JSON object. No markdown fences, no explanation, no thinking, no extra text before or after. Start your reply with { and end with }.
+
 {
   "analysis": "Professional summary of project scope, key observations, and construction approach",
-  "total_cost": <number in SAR>,
+  "total_cost": 150000,
   "bill_of_quantity": [
-    { "item": "Description", "qty": <number>, "unit": "m²/m³/kg/pcs/lm", "unit_price": <SAR>, "total": <SAR> }
+    { "item": "Site Preparation", "qty": 200, "unit": "m²", "unit_price": 25, "total": 5000 }
   ]
 }`;
 
@@ -218,13 +253,12 @@ Respond ONLY with a valid JSON object — no markdown, no text outside the JSON:
       4096,
     );
 
-    const parsed = extractJson(synthesisRaw);
-    if (!parsed) {
-      return NextResponse.json(
-        { error: "Could not parse quotation response as JSON", raw: synthesisRaw.slice(0, 500) },
-        { status: 500 },
-      );
-    }
+    // extractJson always returns an object (falls back to raw analysis text if unparseable)
+    const parsed = extractJson(synthesisRaw) ?? {
+      analysis: synthesisRaw.slice(0, 2000),
+      total_cost: 0,
+      bill_of_quantity: [],
+    };
 
     const boq: Array<{ item: string; qty: number; unit: string; unit_price: number; total: number }> =
       Array.isArray(parsed.bill_of_quantity) ? parsed.bill_of_quantity : [];
