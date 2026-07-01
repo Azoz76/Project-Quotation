@@ -578,8 +578,10 @@ export default function ProjectDetailPage() {
                     <th className="text-left px-5 py-3 font-medium text-text-muted">Item</th>
                     <th className="text-right px-5 py-3 font-medium text-text-muted">Qty</th>
                     <th className="text-left px-5 py-3 font-medium text-text-muted">Unit</th>
-                    <th className="text-right px-5 py-3 font-medium text-text-muted">Unit Price</th>
-                    <th className="text-right px-5 py-3 font-medium text-text-muted">Total</th>
+                    {isAdmin && <>
+                      <th className="text-right px-5 py-3 font-medium text-text-muted">Unit Price</th>
+                      <th className="text-right px-5 py-3 font-medium text-text-muted">Total</th>
+                    </>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -588,17 +590,27 @@ export default function ProjectDetailPage() {
                       <td className="px-5 py-3">{item.item}</td>
                       <td className="px-5 py-3 text-right">{item.qty}</td>
                       <td className="px-5 py-3 text-text-muted">{item.unit}</td>
-                      <td className="px-5 py-3 text-right">{fmt(item.unit_price)}</td>
-                      <td className="px-5 py-3 text-right font-semibold text-primary">{fmt(item.total)}</td>
+                      {isAdmin && <>
+                        <td className="px-5 py-3 text-right">{fmt(item.unit_price)}</td>
+                        <td className="px-5 py-3 text-right font-semibold text-primary">{fmt(item.total)}</td>
+                      </>}
                     </tr>
                   ))}
                 </tbody>
                 <tfoot className="bg-surface border-t-2 border-border">
                   <tr>
-                    <td colSpan={4} className="px-5 py-3 font-semibold text-right text-primary">Grand Total</td>
-                    <td className="px-5 py-3 font-bold text-right text-primary text-base">
-                      {fmt(boqItems.reduce((s, i) => s + i.total, 0))}
-                    </td>
+                    {isAdmin ? (
+                      <>
+                        <td colSpan={4} className="px-5 py-3 font-semibold text-right text-primary">Grand Total</td>
+                        <td className="px-5 py-3 font-bold text-right text-primary text-base">
+                          {fmt(boqItems.reduce((s, i) => s + i.total, 0))}
+                        </td>
+                      </>
+                    ) : (
+                      <td colSpan={3} className="px-5 py-3 font-bold text-right text-primary">
+                        Grand Total: {fmt(boqItems.reduce((s, i) => s + i.total, 0))}
+                      </td>
+                    )}
                   </tr>
                 </tfoot>
               </table>
