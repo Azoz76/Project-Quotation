@@ -9,7 +9,7 @@ import {
   ArrowLeft, MapPin, FileText, FileImage, Calendar,
   DollarSign, ClipboardList, Cpu, HardHat, ExternalLink,
   Upload, ChevronDown, ChevronUp, Loader2, Trash2,
-  RefreshCw, SendHorizonal,
+  RefreshCw, SendHorizonal, Sparkles, CheckCircle2,
 } from "lucide-react";
 
 type UploadRecord = {
@@ -40,6 +40,7 @@ type Quotation = {
 
 type Project = {
   id: string;
+  user_id: string;
   title: string;
   description: string | null;
   location_address: string | null;
@@ -102,6 +103,14 @@ export default function ProjectDetailPage() {
   const [replacingUpload, setReplacingUpload] = useState<UploadRecord | null>(null);
   const [replacingId, setReplacingId] = useState<string | null>(null);
 
+  // Role detection
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Admin AI pricing
+  const [generatingAi, setGeneratingAi] = useState(false);
+  const [approvingAi, setApprovingAi]   = useState(false);
+  const [aiError, setAiError]           = useState("");
+
   // Submit to admin
   const [submitting, setSubmitting] = useState(false);
   // True whenever the client adds/replaces files in this session — causes
@@ -117,16 +126,23 @@ export default function ProjectDetailPage() {
 
   async function load() {
     const supabase = createClient();
-    const { data } = await supabase
-      .from("projects")
-      .select(`
-        id, title, description, location_address, map_url, status, created_at,
-        uploads(id, file_name, file_type, file_size, public_url, storage_path, category, created_at),
-        quotations(id, total_cost, engineer_price, estimated_completion, bill_of_quantity, ai_analysis, materials, status, created_at)
-      `)
-      .eq("id", id)
-      .single();
+    const [{ data }, { data: { user } }] = await Promise.all([
+      supabase
+        .from("projects")
+        .select(`
+          id, user_id, title, description, location_address, map_url, status, created_at,
+          uploads(id, file_name, file_type, file_size, public_url, storage_path, category, created_at),
+          quotations(id, total_cost, engineer_price, estimated_completion, bill_of_quantity, ai_analysis, materials, status, created_at)
+        `)
+        .eq("id", id)
+        .single(),
+      supabase.auth.getUser(),
+    ]);
     setProject(data as unknown as Project);
+    if (user) {
+      const { data: u } = await supabase.from("users").select("role").eq("id", user.id).single();
+      setIsAdmin(u?.role === "admin");
+    }
     setLoading(false);
   }
 
@@ -277,16 +293,78 @@ export default function ProjectDetailPage() {
     await load();
   }
 
+  // ── Admin: Generate AI Pricing ────────────────────────────────────────────────
+  async function generateAiPricing() {
+    if (!project) return;
+    setGeneratingAi(true);
+    setAiError("");
+    try {
+      const res = await fetch("/api/quotation/ai-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setAiError(data.error ?? "AI generation failed"); return; }
+
+      const supabase = createClient();
+      const existing = project.quotations?.[0];
+      if (existing) {
+        await supabase.from("quotations").update({
+          total_cost: data.total_cost,
+          ai_analysis: data.ai_analysis,
+          bill_of_quantity: data.bill_of_quantity,
+          status: "generated",
+        }).eq("id", existing.id);
+      } else {
+        await supabase.from("quotations").insert({
+          project_id: id,
+          user_id: project.user_id,
+          total_cost: data.total_cost,
+          ai_analysis: data.ai_analysis,
+          bill_of_quantity: data.bill_of_quantity,
+          status: "generated",
+        });
+      }
+      await load();
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setGeneratingAi(false);
+    }
+  }
+
+  // ── Admin: Approve & Send to Client ──────────────────────────────────────────
+  async function approveAndSend() {
+    if (!project) return;
+    setApprovingAi(true);
+    const supabase = createClient();
+    const existing = project.quotations?.[0];
+    if (!existing) { setApprovingAi(false); return; }
+
+    await supabase.from("quotations").update({ status: "approved" }).eq("id", existing.id);
+    await supabase.from("projects").update({ status: "quoted" }).eq("id", project.id);
+    await supabase.from("notifications").insert({
+      user_id: project.user_id,
+      message: `Pricing is ready for your project "${project.title}"! Click to view the quotation.`,
+      link: `/dashboard/projects/${project.id}`,
+    });
+    setApprovingAi(false);
+    await load();
+  }
+
   if (loading) return <div className="text-text-muted">Loading project...</div>;
   if (!project) return <div className="text-red-500">Project not found.</div>;
 
   const q = project.quotations?.[0] ?? null;
   const approvedQ = q?.status === "approved" ? q : null;
+  // Admins preview pricing at any status; clients only see approved pricing
+  const displayQ = isAdmin ? q : approvedQ;
   const drawings = project.uploads?.filter(u => u.category === "drawing")  ?? [];
   const permits  = project.uploads?.filter(u => u.category === "permit")   ?? [];
   const docs     = project.uploads?.filter(u => !["drawing", "permit"].includes(u.category)) ?? [];
-  const boqItems: BOQItem[] = Array.isArray(approvedQ?.bill_of_quantity) ? (approvedQ!.bill_of_quantity as BOQItem[]) : [];
-  const materialsItems: MaterialItem[] = Array.isArray(approvedQ?.materials) ? (approvedQ!.materials as MaterialItem[]) : [];
+  const boqItems: BOQItem[] = Array.isArray(displayQ?.bill_of_quantity) ? (displayQ!.bill_of_quantity as BOQItem[]) : [];
+  const materialsItems: MaterialItem[] = Array.isArray(displayQ?.materials) ? (displayQ!.materials as MaterialItem[]) : [];
   const hasFiles = project.uploads?.length > 0;
 
   // ── File row component ────────────────────────────────────────────────────────
@@ -374,9 +452,9 @@ export default function ProjectDetailPage() {
       {/* Pricing Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { icon: Cpu,           label: "AI Pricing",      value: approvedQ?.total_cost != null      ? fmt(approvedQ.total_cost)      : null, color: "text-primary" },
-          { icon: HardHat,       label: "Engineer Pricing", value: approvedQ?.engineer_price != null  ? fmt(approvedQ.engineer_price)  : null, color: "text-green-700" },
-          { icon: Calendar,      label: "Est. Completion",  value: approvedQ?.estimated_completion    ?? null,                                  color: "text-primary" },
+          { icon: Cpu,           label: "AI Pricing",      value: displayQ?.total_cost != null      ? fmt(displayQ.total_cost)      : null, color: "text-primary" },
+          { icon: HardHat,       label: "Engineer Pricing", value: displayQ?.engineer_price != null  ? fmt(displayQ.engineer_price)  : null, color: "text-green-700" },
+          { icon: Calendar,      label: "Est. Completion",  value: displayQ?.estimated_completion    ?? null,                                  color: "text-primary" },
           { icon: ClipboardList, label: "Bill of Qty",      value: boqItems.length > 0 ? `${boqItems.length} items` : null,                    color: "text-primary" },
         ].map(({ icon: Icon, label, value, color }) => (
           <div key={label} className="bg-white rounded-xl border border-border p-4">
@@ -418,13 +496,18 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* AI Analysis */}
-      {approvedQ?.ai_analysis && (
+      {displayQ?.ai_analysis && (
         <div className="bg-white rounded-xl border border-border p-6 space-y-3">
           <div className="flex items-center gap-2">
             <Cpu className="h-5 w-5 text-accent" />
             <h2 className="text-base font-semibold text-primary">AI Analysis</h2>
+            {isAdmin && q?.status !== "approved" && (
+              <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">
+                Admin Preview — Not visible to client yet
+              </span>
+            )}
           </div>
-          <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{approvedQ.ai_analysis}</p>
+          <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{displayQ.ai_analysis}</p>
         </div>
       )}
 
@@ -573,11 +656,96 @@ export default function ProjectDetailPage() {
           <p className="text-sm text-text-muted">No files uploaded yet. Use "Add Files" above.</p>
         )}
 
-        {/* ── Submit / Status area ───────────────────────────────────────── */}
-        {hasFiles && (
-          <div className="pt-3 border-t border-border">
-            {newFilesAdded ? (
-              /* ① New files in session → show Submit button */
+        {/* ── Action area ───────────────────────────────────────────────── */}
+        <div className="pt-3 border-t border-border">
+          {isAdmin ? (
+            /* ── ADMIN: AI Pricing controls ─────────────────────────────── */
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-primary flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-accent" />
+                  AI Pricing
+                </h3>
+                {q && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    q.status === "approved"  ? "bg-green-100 text-green-700"  :
+                    q.status === "generated" ? "bg-blue-100 text-blue-700"   :
+                    "bg-gray-100 text-gray-600"
+                  }`}>
+                    {q.status === "approved" ? "Approved — Sent to client" :
+                     q.status === "generated" ? "Generated — Pending approval" : q.status}
+                  </span>
+                )}
+              </div>
+
+              {q?.total_cost != null && (
+                <div className="bg-surface rounded-lg px-4 py-3 flex items-center justify-between">
+                  <span className="text-sm text-text-muted">AI Estimated Total</span>
+                  <span className="font-bold text-primary text-xl">{fmt(q.total_cost)}</span>
+                </div>
+              )}
+
+              {aiError && (
+                <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{aiError}</p>
+              )}
+
+              {(!q || q.status === "rejected") && (
+                <button
+                  onClick={generateAiPricing}
+                  disabled={generatingAi}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-accent text-white font-semibold rounded-xl hover:bg-accent-hover disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm"
+                >
+                  {generatingAi
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading drawings &amp; calculating…</>
+                    : <><Sparkles className="h-4 w-4" /> Generate AI Pricing</>
+                  }
+                </button>
+              )}
+
+              {q?.status === "generated" && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={approveAndSend}
+                    disabled={approvingAi}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm"
+                  >
+                    {approvingAi
+                      ? <><Loader2 className="h-4 w-4 animate-spin" /> Approving…</>
+                      : <><CheckCircle2 className="h-4 w-4" /> Approve &amp; Send to Client</>
+                    }
+                  </button>
+                  <button
+                    onClick={generateAiPricing}
+                    disabled={generatingAi}
+                    title="Re-generate"
+                    className="flex items-center justify-center gap-2 px-4 py-3 border border-border rounded-xl text-sm font-medium text-text-muted hover:text-primary hover:bg-surface disabled:opacity-60 transition-all"
+                  >
+                    {generatingAi ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    Re-generate
+                  </button>
+                </div>
+              )}
+
+              {q?.status === "approved" && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 px-3 py-2.5 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700 font-medium">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    Pricing approved and visible to client
+                  </div>
+                  <button
+                    onClick={generateAiPricing}
+                    disabled={generatingAi}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-border rounded-xl text-sm text-text-muted hover:text-primary hover:bg-surface disabled:opacity-60 transition-all"
+                  >
+                    {generatingAi ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    Re-generate (will require re-approval)
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : hasFiles ? (
+            /* ── CLIENT: Submit / Waiting ───────────────────────────────── */
+            newFilesAdded ? (
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium text-foreground">Ready to send your documents?</p>
@@ -597,7 +765,6 @@ export default function ProjectDetailPage() {
                 </button>
               </div>
             ) : project?.status === "reviewing" ? (
-              /* ② No new files + status is "reviewing" → Waiting for Pricing */
               <div className="flex items-center gap-4 px-5 py-4 bg-orange-50 border border-orange-200 rounded-xl">
                 <div className="h-9 w-9 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
                   <div className="h-5 w-5 rounded-full border-2 border-orange-400 border-t-transparent animate-spin" />
@@ -609,9 +776,9 @@ export default function ProjectDetailPage() {
                   </p>
                 </div>
               </div>
-            ) : null /* ③ Quoted/accepted/etc. with no new files → nothing shown */}
-          </div>
-        )}
+            ) : null
+          ) : null}
+        </div>
       </div>
     </div>
   );
