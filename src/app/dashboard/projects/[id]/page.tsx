@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
@@ -8,6 +8,7 @@ import { formatDate } from "@/lib/utils";
 import {
   ArrowLeft, MapPin, FileText, FileImage, Calendar,
   DollarSign, ClipboardList, Cpu, HardHat, ExternalLink,
+  Upload, X, ChevronDown, ChevronUp, Loader2,
 } from "lucide-react";
 
 type Upload = {
@@ -47,6 +48,14 @@ type Project = {
   quotations: Quotation[];
 };
 
+const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+
+const UPLOAD_SECTIONS = [
+  { key: "drawing" as const, label: "Engineering Drawings", accept: ".pdf,.dwg,.dxf", hint: "PDF, DWG, DXF" },
+  { key: "permit"  as const, label: "Building Permits",     accept: ".pdf",            hint: "PDF only" },
+  { key: "document" as const, label: "Additional Documents", accept: ".pdf,.docx,.jpg,.jpeg,.png,.webp", hint: "PDF, DOCX, JPG, PNG, WebP" },
+];
+
 const statusColors: Record<string, string> = {
   draft: "bg-gray-100 text-gray-600",
   reviewing: "bg-blue-100 text-blue-700",
@@ -80,45 +89,101 @@ export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploadingCategory, setUploadingCategory] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState("");
+  const refs = {
+    drawing: useRef<HTMLInputElement>(null),
+    permit:  useRef<HTMLInputElement>(null),
+    document: useRef<HTMLInputElement>(null),
+  };
+
+  async function load() {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("projects")
+      .select(`
+        id, title, description, location_address, map_url, status, created_at,
+        uploads(id, file_name, file_type, file_size, public_url, category, created_at),
+        quotations(id, total_cost, engineer_price, estimated_completion, bill_of_quantity, ai_analysis, materials, status, created_at)
+      `)
+      .eq("id", id)
+      .single();
+    setProject(data as unknown as Project);
+    setLoading(false);
+  }
 
   useEffect(() => {
     if (!id) return;
-    const supabase = createClient();
-
-    async function load() {
-      const { data } = await supabase
-        .from("projects")
-        .select(`
-          id, title, description, location_address, map_url, status, created_at,
-          uploads(id, file_name, file_type, file_size, public_url, category, created_at),
-          quotations(id, total_cost, engineer_price, estimated_completion, bill_of_quantity, ai_analysis, materials, status, created_at)
-        `)
-        .eq("id", id)
-        .single();
-      setProject(data as unknown as Project);
-      setLoading(false);
-    }
-
     load();
-
+    const supabase = createClient();
     const channel = supabase
       .channel(`project-detail-${id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "projects", filter: `id=eq.${id}` }, () => load())
-      .on("postgres_changes", { event: "*", schema: "public", table: "quotations", filter: `project_id=eq.${id}` }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects", filter: `id=eq.${id}` }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "quotations", filter: `project_id=eq.${id}` }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "uploads", filter: `project_id=eq.${id}` }, load)
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function handleFileUpload(
+    e: React.ChangeEvent<HTMLInputElement>,
+    category: "drawing" | "permit" | "document"
+  ) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    setUploadError("");
+
+    const oversized = files.filter(f => f.size > MAX_SIZE);
+    if (oversized.length) {
+      setUploadError(`File too large (max 10 MB): ${oversized.map(f => f.name).join(", ")}`);
+      e.target.value = "";
+      return;
+    }
+
+    setUploadingCategory(category);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setUploadError("Not authenticated."); setUploadingCategory(null); return; }
+
+    const errors: string[] = [];
+
+    for (const file of files) {
+      const path = `${user.id}/${id}/${Date.now()}-${file.name}`;
+      const { error: storageError } = await supabase.storage.from("uploads").upload(path, file);
+      if (storageError) {
+        errors.push(`${file.name}: ${storageError.message}`);
+        continue;
+      }
+      const { data: { publicUrl } } = supabase.storage.from("uploads").getPublicUrl(path);
+      const { error: dbError } = await supabase.from("uploads").insert({
+        project_id: id,
+        user_id: user.id,
+        file_name: file.name,
+        file_type: file.type || "application/octet-stream",
+        file_size: file.size,
+        storage_path: path,
+        public_url: publicUrl,
+        category,
+      });
+      if (dbError) errors.push(`${file.name}: ${dbError.message}`);
+    }
+
+    if (errors.length) setUploadError(errors.join("\n"));
+    e.target.value = "";
+    setUploadingCategory(null);
+    await load();
+  }
 
   if (loading) return <div className="text-text-muted">Loading project...</div>;
   if (!project) return <div className="text-red-500">Project not found.</div>;
 
   const q = project.quotations?.[0] ?? null;
-  // Only expose pricing/BOQ when admin has approved
   const approvedQ = q?.status === "approved" ? q : null;
   const drawings = project.uploads?.filter(u => u.category === "drawing") ?? [];
-  const permits = project.uploads?.filter(u => u.category === "permit") ?? [];
-  const docs = project.uploads?.filter(u => !["drawing", "permit"].includes(u.category)) ?? [];
+  const permits  = project.uploads?.filter(u => u.category === "permit")  ?? [];
+  const docs     = project.uploads?.filter(u => !["drawing", "permit"].includes(u.category)) ?? [];
   const boqItems: BOQItem[] = Array.isArray(approvedQ?.bill_of_quantity) ? (approvedQ!.bill_of_quantity as BOQItem[]) : [];
   const materialsItems: MaterialItem[] = Array.isArray(approvedQ?.materials) ? (approvedQ!.materials as MaterialItem[]) : [];
 
@@ -144,10 +209,10 @@ export default function ProjectDetailPage() {
       {/* Pricing Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { icon: Cpu, label: "AI Pricing", value: approvedQ?.total_cost != null ? fmt(approvedQ.total_cost) : null, color: "text-primary" },
-          { icon: HardHat, label: "Engineer Pricing", value: approvedQ?.engineer_price != null ? fmt(approvedQ.engineer_price) : null, color: "text-green-700" },
-          { icon: Calendar, label: "Est. Completion", value: approvedQ?.estimated_completion ?? null, color: "text-primary" },
-          { icon: ClipboardList, label: "Bill of Qty", value: boqItems.length > 0 ? `${boqItems.length} items` : null, color: "text-primary" },
+          { icon: Cpu,          label: "AI Pricing",      value: approvedQ?.total_cost != null ? fmt(approvedQ.total_cost) : null,           color: "text-primary" },
+          { icon: HardHat,      label: "Engineer Pricing", value: approvedQ?.engineer_price != null ? fmt(approvedQ.engineer_price) : null,   color: "text-green-700" },
+          { icon: Calendar,     label: "Est. Completion",  value: approvedQ?.estimated_completion ?? null,                                    color: "text-primary" },
+          { icon: ClipboardList, label: "Bill of Qty",     value: boqItems.length > 0 ? `${boqItems.length} items` : null,                   color: "text-primary" },
         ].map(({ icon: Icon, label, value, color }) => (
           <div key={label} className="bg-white rounded-xl border border-border p-4">
             <div className="flex items-center gap-2 mb-2">
@@ -189,7 +254,7 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
-      {/* AI Analysis — only visible after admin approval */}
+      {/* AI Analysis */}
       {approvedQ?.ai_analysis && (
         <div className="bg-white rounded-xl border border-border p-6 space-y-3">
           <div className="flex items-center gap-2">
@@ -268,40 +333,99 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Uploaded Files */}
-      {project.uploads?.length > 0 && (
-        <div className="bg-white rounded-xl border border-border p-6 space-y-5">
+      {/* Uploaded Files + Add More */}
+      <div className="bg-white rounded-xl border border-border p-6 space-y-5">
+        <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-primary">Uploaded Files</h2>
-          {[
-            { label: "Engineering Drawings", files: drawings },
-            { label: "Building Permits", files: permits },
-            { label: "Additional Documents", files: docs },
-          ].filter(g => g.files.length > 0).map(group => (
-            <div key={group.label}>
-              <p className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-2">{group.label}</p>
-              <div className="space-y-2">
-                {group.files.map(f => (
-                  <a key={f.id} href={f.public_url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center justify-between px-4 py-3 bg-surface rounded-lg hover:bg-surface-alt transition-colors group">
-                    <div className="flex items-center gap-3">
-                      {f.file_type.startsWith("image/") ? (
-                        <FileImage className="h-4 w-4 text-accent shrink-0" />
-                      ) : (
-                        <FileText className="h-4 w-4 text-accent shrink-0" />
-                      )}
-                      <div>
-                        <p className="text-sm font-medium text-primary group-hover:text-accent transition-colors">{f.file_name}</p>
-                        <p className="text-xs text-text-muted">{formatBytes(f.file_size)}</p>
-                      </div>
-                    </div>
-                    <ExternalLink className="h-4 w-4 text-text-muted group-hover:text-accent transition-colors shrink-0" />
-                  </a>
-                ))}
-              </div>
-            </div>
-          ))}
+          <button
+            onClick={() => { setShowUpload(v => !v); setUploadError(""); }}
+            className="flex items-center gap-1.5 text-sm text-accent hover:text-accent-hover font-medium transition-colors"
+          >
+            <Upload className="h-4 w-4" />
+            Add Files
+            {showUpload ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
         </div>
-      )}
+
+        {/* Upload panel */}
+        {showUpload && (
+          <div className="border border-dashed border-accent/40 rounded-xl p-4 space-y-4 bg-surface/30">
+            <p className="text-xs text-text-muted">Select files to upload — they are saved immediately upon selection.</p>
+            {uploadError && (
+              <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 whitespace-pre-wrap">
+                <X className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                {uploadError}
+              </div>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {UPLOAD_SECTIONS.map(section => (
+                <div key={section.key}>
+                  <p className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-1.5">{section.label}</p>
+                  <button
+                    type="button"
+                    onClick={() => refs[section.key].current?.click()}
+                    disabled={uploadingCategory !== null}
+                    className="w-full flex flex-col items-center justify-center h-24 border-2 border-dashed border-border rounded-lg hover:border-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {uploadingCategory === section.key
+                      ? <Loader2 className="h-5 w-5 animate-spin text-accent" />
+                      : <Upload className="h-5 w-5 text-text-muted mb-1" />
+                    }
+                    <span className="text-xs text-text-muted mt-1">
+                      {uploadingCategory === section.key ? "Uploading…" : "Click to select"}
+                    </span>
+                    <span className="text-xs text-text-muted/70">{section.hint}</span>
+                  </button>
+                  <input
+                    ref={refs[section.key]}
+                    type="file"
+                    accept={section.accept}
+                    multiple
+                    className="hidden"
+                    onChange={e => handleFileUpload(e, section.key)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* File list */}
+        {project.uploads?.length > 0 ? (
+          <>
+            {[
+              { label: "Engineering Drawings", files: drawings },
+              { label: "Building Permits",     files: permits },
+              { label: "Additional Documents", files: docs },
+            ].filter(g => g.files.length > 0).map(group => (
+              <div key={group.label}>
+                <p className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-2">{group.label}</p>
+                <div className="space-y-2">
+                  {group.files.map(f => (
+                    <a key={f.id} href={f.public_url} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center justify-between px-4 py-3 bg-surface rounded-lg hover:bg-surface-alt transition-colors group">
+                      <div className="flex items-center gap-3">
+                        {f.file_type.startsWith("image/") ? (
+                          <FileImage className="h-4 w-4 text-accent shrink-0" />
+                        ) : (
+                          <FileText className="h-4 w-4 text-accent shrink-0" />
+                        )}
+                        <div>
+                          <p className="text-sm font-medium text-primary group-hover:text-accent transition-colors">{f.file_name}</p>
+                          <p className="text-xs text-text-muted">{formatBytes(f.file_size)}</p>
+                        </div>
+                      </div>
+                      <ExternalLink className="h-4 w-4 text-text-muted group-hover:text-accent transition-colors shrink-0" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </>
+        ) : (
+          <p className="text-sm text-text-muted">No files uploaded yet. Use the button above to add files.</p>
+        )}
+      </div>
     </div>
   );
 }

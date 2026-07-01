@@ -41,13 +41,21 @@ export default function NewProjectPage() {
   ) {
     if (!files) return;
     const newFiles: FileUpload[] = [];
+    const rejected: string[] = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const ext = "." + file.name.split(".").pop()?.toLowerCase();
-      if (!allowed.includes(ext)) continue;
-      if (file.size > MAX_SIZE) continue;
+      if (!allowed.includes(ext)) {
+        rejected.push(`"${file.name}" — unsupported type (allowed: ${allowed.join(", ")})`);
+        continue;
+      }
+      if (file.size > MAX_SIZE) {
+        rejected.push(`"${file.name}" — file too large (max 10 MB)`);
+        continue;
+      }
       newFiles.push({ file, category });
     }
+    if (rejected.length) setSubmitError(rejected.join("\n"));
     setter((prev) => [...prev, ...newFiles]);
   }
 
@@ -96,6 +104,7 @@ export default function NewProjectPage() {
 
       const allFiles = [...drawings, ...permits, ...documents];
       const total = allFiles.length;
+      const fileErrors: string[] = [];
 
       for (let i = 0; i < allFiles.length; i++) {
         const { file, category } = allFiles[i];
@@ -105,9 +114,11 @@ export default function NewProjectPage() {
           .from("uploads")
           .upload(path, file);
 
-        if (!uploadError) {
+        if (uploadError) {
+          fileErrors.push(`"${file.name}": ${uploadError.message}`);
+        } else {
           const { data: { publicUrl } } = supabase.storage.from("uploads").getPublicUrl(path);
-          await supabase.from("uploads").insert({
+          const { error: dbError } = await supabase.from("uploads").insert({
             project_id: project.id,
             user_id: user.id,
             file_name: file.name,
@@ -117,9 +128,16 @@ export default function NewProjectPage() {
             public_url: publicUrl,
             category,
           });
+          if (dbError) fileErrors.push(`"${file.name}" (DB): ${dbError.message}`);
         }
 
         setUploadProgress(Math.round(((i + 1) / total) * 100));
+      }
+
+      if (fileErrors.length) {
+        setSubmitError(`Project created, but some files failed to upload:\n${fileErrors.join("\n")}`);
+        setSaving(false);
+        return;
       }
 
       await supabase.from("notifications").insert({
