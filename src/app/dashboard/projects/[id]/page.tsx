@@ -9,7 +9,7 @@ import {
   ArrowLeft, MapPin, FileText, FileImage, Calendar,
   DollarSign, ClipboardList, Cpu, HardHat, ExternalLink,
   Upload, ChevronDown, ChevronUp, Loader2, Trash2,
-  RefreshCw, SendHorizonal, CheckCircle2,
+  RefreshCw, SendHorizonal,
 } from "lucide-react";
 
 type UploadRecord = {
@@ -104,7 +104,9 @@ export default function ProjectDetailPage() {
 
   // Submit to admin
   const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  // True whenever the client adds/replaces files in this session — causes
+  // the Submit button to reappear even if status is already "reviewing"
+  const [newFilesAdded, setNewFilesAdded] = useState(false);
 
   const addRefs = {
     drawing:  useRef<HTMLInputElement>(null),
@@ -179,6 +181,7 @@ export default function ProjectDetailPage() {
     }
 
     if (errors.length) setUploadError(errors.join("\n"));
+    else setNewFilesAdded(true);
     e.target.value = "";
     setUploadingCategory(null);
     await load();
@@ -248,6 +251,7 @@ export default function ProjectDetailPage() {
     setReplacingId(null);
     setReplacingUpload(null);
     setUploadError("");
+    setNewFilesAdded(true);
     await load();
   }
 
@@ -269,7 +273,7 @@ export default function ProjectDetailPage() {
     });
 
     setSubmitting(false);
-    setSubmitted(true);
+    setNewFilesAdded(false);
     await load();
   }
 
@@ -569,18 +573,11 @@ export default function ProjectDetailPage() {
           <p className="text-sm text-text-muted">No files uploaded yet. Use "Add Files" above.</p>
         )}
 
-        {/* ── Submit to Admin button ─────────────────────────────────────── */}
+        {/* ── Submit / Status area ───────────────────────────────────────── */}
         {hasFiles && (
-          <div className="pt-2 border-t border-border">
-            {submitted ? (
-              <div className="flex items-center gap-3 px-5 py-4 bg-green-50 border border-green-200 rounded-xl">
-                <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
-                <div>
-                  <p className="text-sm font-semibold text-green-800">Documents submitted for review</p>
-                  <p className="text-xs text-green-700 mt-0.5">Our team will review your files and get back to you shortly.</p>
-                </div>
-              </div>
-            ) : (
+          <div className="pt-3 border-t border-border">
+            {newFilesAdded ? (
+              /* ① New files in session → show Submit button */
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium text-foreground">Ready to send your documents?</p>
@@ -599,7 +596,20 @@ export default function ProjectDetailPage() {
                   }
                 </button>
               </div>
-            )}
+            ) : project?.status === "reviewing" ? (
+              /* ② No new files + status is "reviewing" → Waiting for Pricing */
+              <div className="flex items-center gap-4 px-5 py-4 bg-orange-50 border border-orange-200 rounded-xl">
+                <div className="h-9 w-9 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
+                  <div className="h-5 w-5 rounded-full border-2 border-orange-400 border-t-transparent animate-spin" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-orange-800">Waiting for Pricing</p>
+                  <p className="text-xs text-orange-700 mt-0.5">
+                    Your documents are under review. We&apos;ll notify you as soon as pricing is ready.
+                  </p>
+                </div>
+              </div>
+            ) : null /* ③ Quoted/accepted/etc. with no new files → nothing shown */}
           </div>
         )}
       </div>
