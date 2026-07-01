@@ -123,7 +123,7 @@ async function callOpenRouter(
   return (data.choices?.[0]?.message?.content ?? "") as string;
 }
 
-// Try each model; skip on 4xx/5xx that signal unavailability or rate-limiting
+// Generic fallback for non-critical steps (vision etc.)
 async function callWithFallback(
   apiKey: string,
   models: string[],
@@ -139,7 +139,6 @@ async function callWithFallback(
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       errors.push(msg);
-      // Only continue to next model if it's a transient/availability error
       const skip =
         msg.includes("429") || msg.includes("402") || msg.includes("404") ||
         msg.includes("rate") || msg.includes("unavailable") ||
@@ -148,6 +147,34 @@ async function callWithFallback(
     }
   }
   throw new Error(`All models failed:\n${errors.slice(0, 5).join("\n")}`);
+}
+
+// Synthesis-specific: keeps trying models until one returns a BOQ with ≥3 items and total > 0
+async function callSynthesisWithValidation(
+  apiKey: string,
+  models: string[],
+  messages: object[],
+): Promise<Record<string, unknown>> {
+  const errors: string[] = [];
+  for (const model of models) {
+    try {
+      const raw = await callOpenRouter(apiKey, model, messages, 4096);
+      const parsed = extractJson(raw);
+      const boq = Array.isArray(parsed?.bill_of_quantity) ? parsed!.bill_of_quantity as unknown[] : [];
+      const total = Number(parsed?.total_cost ?? 0);
+      if (boq.length >= 3 && total > 0) return parsed!;
+      errors.push(`[${model}]: only ${boq.length} BOQ items, total=${total} — retrying`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errors.push(msg);
+      const skip =
+        msg.includes("429") || msg.includes("402") || msg.includes("404") ||
+        msg.includes("rate") || msg.includes("unavailable") ||
+        msg.includes("No endpoints") || msg.includes("free");
+      if (!skip) throw e;
+    }
+  }
+  throw new Error(`No model produced a valid BOQ:\n${errors.slice(0, 8).join("\n")}`);
 }
 
 export async function POST(request: Request) {
@@ -214,60 +241,52 @@ Be as specific and detailed as possible.`,
     }
 
     // ── STEP 2: Text synthesis — generate professional BOQ ────────────────────
-    // Fetch the live list of available free models dynamically
     const liveModels = await fetchLiveFreeModels(apiKey);
     const synthesisModels = liveModels.length > 0 ? liveModels : EMERGENCY_TEXT_MODELS;
 
-    const synthesisPrompt = `You are a senior construction quantity surveyor in Saudi Arabia. Based on the project details and drawing analysis below, produce a complete professional construction quotation.
+    const hasDrawingData = extractedInfo !== "No image drawings uploaded. Use project description and document names only.";
+    const estimateNote = hasDrawingData
+      ? `DRAWING ANALYSIS (use as primary quantity source):\n${extractedInfo}`
+      : `NO DRAWINGS UPLOADED. Estimate quantities for a typical Saudi residential house:
+- Assume 2-storey villa, ground floor 150 m², first floor 150 m² (total BUA 300 m²)
+- Plot area 400 m², garden/external works 200 m²
+- Typical construction: reinforced concrete frame, hollow block walls, ceramic tile finishes`;
 
-PROJECT DETAILS:
+    const synthesisPrompt = `You are a senior construction quantity surveyor in Saudi Arabia.
+Produce a complete Bill of Quantities (BOQ) and cost estimate in SAR (Saudi Riyals) for the project below.
+
+PROJECT:
 - Title: ${project.title}
-- Description: ${project.description ?? "Not provided"}
-- Location: ${project.location_address ?? "Not provided"}
-${docUploads.length > 0 ? `- Supporting documents: ${docUploads.map(u => u.file_name).join(", ")}` : ""}
+- Description: ${project.description ?? "Residential construction project"}
+- Location: ${project.location_address ?? "Saudi Arabia"}
+${docUploads.length > 0 ? `- Documents: ${docUploads.map(u => u.file_name).join(", ")}` : ""}
 
-DRAWING ANALYSIS (extracted by AI vision):
-${extractedInfo}
+${estimateNote}
 
-INSTRUCTIONS:
-1. Use the extracted drawing data as the primary source for quantities
-2. Apply realistic Saudi Arabian construction unit rates in SAR
-3. Cover ALL major work items: site preparation, foundations, structure, masonry, finishing, MEP, external works
-4. Each BOQ item must have realistic qty, unit, unit_price, and total (total = qty × unit_price)
-5. The grand total_cost must equal the sum of all BOQ item totals
+RULES (follow exactly):
+1. Include ALL work sections: Site Preparation, Demolition (if any), Foundations, Superstructure, Masonry/Blockwork, Waterproofing, Plastering, Flooring, Painting, Doors & Windows, Plumbing, Electrical, HVAC, External Works
+2. Minimum 15 line items in bill_of_quantity
+3. Every item: qty (number), unit (m²/m³/kg/pcs/lm/ls), unit_price (SAR number), total = qty × unit_price
+4. total_cost = exact arithmetic sum of all item totals
+5. All prices in SAR — do NOT use any other currency
 
-OUTPUT FORMAT: Reply with ONLY a raw JSON object. No markdown fences, no explanation, no thinking, no extra text before or after. Start your reply with { and end with }.
+Reply with ONLY this JSON (no markdown, no extra text, start with {):
+{"analysis":"<2-3 sentence project summary>","total_cost":<number>,"bill_of_quantity":[{"item":"<name>","qty":<n>,"unit":"<u>","unit_price":<n>,"total":<n>}]}`;
 
-{
-  "analysis": "Professional summary of project scope, key observations, and construction approach",
-  "total_cost": 150000,
-  "bill_of_quantity": [
-    { "item": "Site Preparation", "qty": 200, "unit": "m²", "unit_price": 25, "total": 5000 }
-  ]
-}`;
-
-    const synthesisRaw = await callWithFallback(
+    const parsed = await callSynthesisWithValidation(
       apiKey,
       synthesisModels,
       [{ role: "user", content: synthesisPrompt }],
-      4096,
     );
 
-    // extractJson always returns an object (falls back to raw analysis text if unparseable)
-    const parsed = extractJson(synthesisRaw) ?? {
-      analysis: synthesisRaw.slice(0, 2000),
-      total_cost: 0,
-      bill_of_quantity: [],
-    };
-
     const boq: Array<{ item: string; qty: number; unit: string; unit_price: number; total: number }> =
-      Array.isArray(parsed.bill_of_quantity) ? parsed.bill_of_quantity : [];
+      Array.isArray(parsed.bill_of_quantity) ? parsed.bill_of_quantity as Array<{ item: string; qty: number; unit: string; unit_price: number; total: number }> : [];
     const computedTotal = boq.reduce((s, r) => s + (Number(r.total) || 0), 0);
     const finalTotal = computedTotal > 0 ? computedTotal : (Number(parsed.total_cost) || 0);
 
     return NextResponse.json({
       total_cost: finalTotal,
-      ai_analysis: typeof parsed.analysis === "string" ? parsed.analysis : synthesisRaw.slice(0, 1000),
+      ai_analysis: typeof parsed.analysis === "string" ? parsed.analysis : project.title,
       bill_of_quantity: boq,
       drawing_extraction: extractedInfo,
     });
