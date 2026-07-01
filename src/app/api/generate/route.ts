@@ -22,7 +22,7 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemma-3-27b-it:free",
+        model: "meta-llama/llama-3.3-70b-instruct:free",
         messages: [
           { role: "system", content: systemPrompts[type] ?? systemPrompts.description },
           { role: "user", content: prompt },

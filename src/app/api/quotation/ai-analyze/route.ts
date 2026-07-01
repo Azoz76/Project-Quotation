@@ -136,7 +136,7 @@ Respond ONLY with a valid JSON object — no markdown, no text outside the JSON:
 
     const synthesisRaw = await callOpenRouter(
       apiKey,
-      "google/gemma-3-27b-it:free",
+      "meta-llama/llama-3.3-70b-instruct:free",
       [{ role: "user", content: synthesisPrompt }],
       4096,
     );
