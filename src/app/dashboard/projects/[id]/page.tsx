@@ -8,15 +8,17 @@ import { formatDate } from "@/lib/utils";
 import {
   ArrowLeft, MapPin, FileText, FileImage, Calendar,
   DollarSign, ClipboardList, Cpu, HardHat, ExternalLink,
-  Upload, X, ChevronDown, ChevronUp, Loader2,
+  Upload, ChevronDown, ChevronUp, Loader2, Trash2,
+  RefreshCw, SendHorizonal, CheckCircle2,
 } from "lucide-react";
 
-type Upload = {
+type UploadRecord = {
   id: string;
   file_name: string;
   file_type: string;
   file_size: number;
   public_url: string;
+  storage_path: string;
   category: string;
   created_at: string;
 };
@@ -44,34 +46,34 @@ type Project = {
   map_url: string | null;
   status: string;
   created_at: string;
-  uploads: Upload[];
+  uploads: UploadRecord[];
   quotations: Quotation[];
 };
 
-const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+const MAX_SIZE = 10 * 1024 * 1024;
 
 const UPLOAD_SECTIONS = [
-  { key: "drawing" as const, label: "Engineering Drawings", accept: ".pdf,.dwg,.dxf", hint: "PDF, DWG, DXF" },
-  { key: "permit"  as const, label: "Building Permits",     accept: ".pdf",            hint: "PDF only" },
-  { key: "document" as const, label: "Additional Documents", accept: ".pdf,.docx,.jpg,.jpeg,.png,.webp", hint: "PDF, DOCX, JPG, PNG, WebP" },
+  { key: "drawing"  as const, label: "Engineering Drawings", accept: ".pdf,.dwg,.dxf",                        hint: "PDF, DWG, DXF" },
+  { key: "permit"   as const, label: "Building Permits",     accept: ".pdf",                                   hint: "PDF only" },
+  { key: "document" as const, label: "Additional Documents", accept: ".pdf,.docx,.jpg,.jpeg,.png,.webp",       hint: "PDF, DOCX, JPG, PNG, WebP" },
 ];
 
 const statusColors: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-600",
-  reviewing: "bg-blue-100 text-blue-700",
-  quoted: "bg-orange-100 text-orange-700",
-  accepted: "bg-green-100 text-green-700",
+  draft:       "bg-gray-100 text-gray-600",
+  reviewing:   "bg-blue-100 text-blue-700",
+  quoted:      "bg-orange-100 text-orange-700",
+  accepted:    "bg-green-100 text-green-700",
   in_progress: "bg-yellow-100 text-yellow-700",
-  completed: "bg-primary/10 text-primary",
+  completed:   "bg-primary/10 text-primary",
 };
 
 const statusLabels: Record<string, string> = {
-  draft: "Draft",
-  reviewing: "Reviewing for Pricing",
-  quoted: "Quoted",
-  accepted: "Accepted",
+  draft:       "Draft",
+  reviewing:   "Reviewing for Pricing",
+  quoted:      "Quoted",
+  accepted:    "Accepted",
   in_progress: "In Progress",
-  completed: "Completed",
+  completed:   "Completed",
 };
 
 function fmt(n: number | null | undefined) {
@@ -89,14 +91,27 @@ export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Upload panel
   const [showUpload, setShowUpload] = useState(false);
   const [uploadingCategory, setUploadingCategory] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState("");
-  const refs = {
-    drawing: useRef<HTMLInputElement>(null),
-    permit:  useRef<HTMLInputElement>(null),
+
+  // Per-file actions
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [replacingUpload, setReplacingUpload] = useState<UploadRecord | null>(null);
+  const [replacingId, setReplacingId] = useState<string | null>(null);
+
+  // Submit to admin
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  const addRefs = {
+    drawing:  useRef<HTMLInputElement>(null),
+    permit:   useRef<HTMLInputElement>(null),
     document: useRef<HTMLInputElement>(null),
   };
+  const replaceRef = useRef<HTMLInputElement>(null);
 
   async function load() {
     const supabase = createClient();
@@ -104,7 +119,7 @@ export default function ProjectDetailPage() {
       .from("projects")
       .select(`
         id, title, description, location_address, map_url, status, created_at,
-        uploads(id, file_name, file_type, file_size, public_url, category, created_at),
+        uploads(id, file_name, file_type, file_size, public_url, storage_path, category, created_at),
         quotations(id, total_cost, engineer_price, estimated_completion, bill_of_quantity, ai_analysis, materials, status, created_at)
       `)
       .eq("id", id)
@@ -119,17 +134,18 @@ export default function ProjectDetailPage() {
     const supabase = createClient();
     const channel = supabase
       .channel(`project-detail-${id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "projects", filter: `id=eq.${id}` }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "quotations", filter: `project_id=eq.${id}` }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "uploads", filter: `project_id=eq.${id}` }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects",   filter: `id=eq.${id}` },          load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "quotations", filter: `project_id=eq.${id}` },  load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "uploads",    filter: `project_id=eq.${id}` },  load)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  async function handleFileUpload(
+  // ── Add files ────────────────────────────────────────────────────────────────
+  async function handleAddFiles(
     e: React.ChangeEvent<HTMLInputElement>,
-    category: "drawing" | "permit" | "document"
+    category: "drawing" | "permit" | "document",
   ) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
@@ -148,27 +164,18 @@ export default function ProjectDetailPage() {
     if (!user) { setUploadError("Not authenticated."); setUploadingCategory(null); return; }
 
     const errors: string[] = [];
-
     for (const file of files) {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const path = `${user.id}/${id}/${Date.now()}-${safeName}`;
-      const { error: storageError } = await supabase.storage.from("uploads").upload(path, file);
-      if (storageError) {
-        errors.push(`${file.name}: ${storageError.message}`);
-        continue;
-      }
+      const { error: storageErr } = await supabase.storage.from("uploads").upload(path, file);
+      if (storageErr) { errors.push(`${file.name}: ${storageErr.message}`); continue; }
       const { data: { publicUrl } } = supabase.storage.from("uploads").getPublicUrl(path);
-      const { error: dbError } = await supabase.from("uploads").insert({
-        project_id: id,
-        user_id: user.id,
-        file_name: file.name,
-        file_type: file.type || "application/octet-stream",
-        file_size: file.size,
-        storage_path: path,
-        public_url: publicUrl,
-        category,
+      const { error: dbErr } = await supabase.from("uploads").insert({
+        project_id: id, user_id: user.id,
+        file_name: file.name, file_type: file.type || "application/octet-stream",
+        file_size: file.size, storage_path: path, public_url: publicUrl, category,
       });
-      if (dbError) errors.push(`${file.name}: ${dbError.message}`);
+      if (dbErr) errors.push(`${file.name} (DB): ${dbErr.message}`);
     }
 
     if (errors.length) setUploadError(errors.join("\n"));
@@ -177,19 +184,172 @@ export default function ProjectDetailPage() {
     await load();
   }
 
+  // ── Delete file ───────────────────────────────────────────────────────────────
+  async function deleteFile(upload: UploadRecord) {
+    if (!confirm(`Delete "${upload.file_name}"?`)) return;
+    setDeletingId(upload.id);
+    const supabase = createClient();
+    if (upload.storage_path) {
+      await supabase.storage.from("uploads").remove([upload.storage_path]);
+    }
+    await supabase.from("uploads").delete().eq("id", upload.id);
+    setDeletingId(null);
+    await load();
+  }
+
+  // ── Replace file ──────────────────────────────────────────────────────────────
+  function startReplace(upload: UploadRecord) {
+    setReplacingUpload(upload);
+    replaceRef.current?.click();
+  }
+
+  async function handleReplace(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !replacingUpload) return;
+    e.target.value = "";
+
+    if (file.size > MAX_SIZE) {
+      setUploadError(`"${file.name}" is too large (max 10 MB).`);
+      setReplacingUpload(null);
+      return;
+    }
+
+    setReplacingId(replacingUpload.id);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setReplacingUpload(null); setReplacingId(null); return; }
+
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const newPath = `${user.id}/${id}/${Date.now()}-${safeName}`;
+
+    const { error: storageErr } = await supabase.storage.from("uploads").upload(newPath, file);
+    if (storageErr) {
+      setUploadError(`Replace failed: ${storageErr.message}`);
+      setReplacingId(null); setReplacingUpload(null);
+      return;
+    }
+
+    const { data: { publicUrl } } = supabase.storage.from("uploads").getPublicUrl(newPath);
+
+    // Update DB record to point to new file
+    await supabase.from("uploads").update({
+      file_name: file.name,
+      file_type: file.type || "application/octet-stream",
+      file_size: file.size,
+      storage_path: newPath,
+      public_url: publicUrl,
+    }).eq("id", replacingUpload.id);
+
+    // Delete old file from storage
+    if (replacingUpload.storage_path) {
+      await supabase.storage.from("uploads").remove([replacingUpload.storage_path]);
+    }
+
+    setReplacingId(null);
+    setReplacingUpload(null);
+    setUploadError("");
+    await load();
+  }
+
+  // ── Submit to admin ───────────────────────────────────────────────────────────
+  async function submitToAdmin() {
+    setSubmitting(true);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !project) { setSubmitting(false); return; }
+
+    // Set project back to "reviewing" so admin sees it in review queue
+    await supabase.from("projects").update({ status: "reviewing" as "draft" }).eq("id", project.id);
+
+    // Notify the client themselves (confirmation)
+    await supabase.from("notifications").insert({
+      user_id: user.id,
+      message: `Your updated documents for "${project.title}" have been submitted for admin review.`,
+      link: `/dashboard/projects/${project.id}`,
+    });
+
+    setSubmitting(false);
+    setSubmitted(true);
+    await load();
+  }
+
   if (loading) return <div className="text-text-muted">Loading project...</div>;
   if (!project) return <div className="text-red-500">Project not found.</div>;
 
   const q = project.quotations?.[0] ?? null;
   const approvedQ = q?.status === "approved" ? q : null;
-  const drawings = project.uploads?.filter(u => u.category === "drawing") ?? [];
-  const permits  = project.uploads?.filter(u => u.category === "permit")  ?? [];
+  const drawings = project.uploads?.filter(u => u.category === "drawing")  ?? [];
+  const permits  = project.uploads?.filter(u => u.category === "permit")   ?? [];
   const docs     = project.uploads?.filter(u => !["drawing", "permit"].includes(u.category)) ?? [];
   const boqItems: BOQItem[] = Array.isArray(approvedQ?.bill_of_quantity) ? (approvedQ!.bill_of_quantity as BOQItem[]) : [];
   const materialsItems: MaterialItem[] = Array.isArray(approvedQ?.materials) ? (approvedQ!.materials as MaterialItem[]) : [];
+  const hasFiles = project.uploads?.length > 0;
+
+  // ── File row component ────────────────────────────────────────────────────────
+  function FileRow({ f }: { f: UploadRecord }) {
+    const isDeleting  = deletingId  === f.id;
+    const isReplacing = replacingId === f.id;
+    const busy = isDeleting || isReplacing;
+    return (
+      <div className="flex items-center justify-between px-4 py-3 bg-surface rounded-lg group">
+        <a href={f.public_url} target="_blank" rel="noopener noreferrer"
+          className="flex items-center gap-3 flex-1 min-w-0 hover:opacity-80 transition-opacity">
+          {f.file_type.startsWith("image/") ? (
+            <FileImage className="h-4 w-4 text-accent shrink-0" />
+          ) : (
+            <FileText className="h-4 w-4 text-accent shrink-0" />
+          )}
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-primary group-hover:text-accent transition-colors truncate">{f.file_name}</p>
+            <p className="text-xs text-text-muted">{formatBytes(f.file_size)}</p>
+          </div>
+        </a>
+
+        <div className="flex items-center gap-1.5 ml-3 shrink-0">
+          {busy ? (
+            <Loader2 className="h-4 w-4 animate-spin text-text-muted" />
+          ) : (
+            <>
+              {/* Replace */}
+              <button
+                onClick={() => startReplace(f)}
+                title="Replace file"
+                className="p-1.5 rounded-lg text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+              {/* Delete */}
+              <button
+                onClick={() => deleteFile(f)}
+                title="Delete file"
+                className="p-1.5 rounded-lg text-text-muted hover:text-red-600 hover:bg-red-50 transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+              {/* Open */}
+              <a href={f.public_url} target="_blank" rel="noopener noreferrer"
+                title="Open file"
+                className="p-1.5 rounded-lg text-text-muted hover:text-accent hover:bg-accent/10 transition-colors">
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl space-y-6">
+      {/* Hidden replace input */}
+      <input
+        ref={replaceRef}
+        type="file"
+        accept=".pdf,.dwg,.dxf,.docx,.jpg,.jpeg,.png,.webp"
+        className="hidden"
+        onChange={handleReplace}
+      />
+
       {/* Header */}
       <div className="flex items-start gap-4">
         <Link href="/dashboard/projects"
@@ -210,19 +370,17 @@ export default function ProjectDetailPage() {
       {/* Pricing Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { icon: Cpu,          label: "AI Pricing",      value: approvedQ?.total_cost != null ? fmt(approvedQ.total_cost) : null,           color: "text-primary" },
-          { icon: HardHat,      label: "Engineer Pricing", value: approvedQ?.engineer_price != null ? fmt(approvedQ.engineer_price) : null,   color: "text-green-700" },
-          { icon: Calendar,     label: "Est. Completion",  value: approvedQ?.estimated_completion ?? null,                                    color: "text-primary" },
-          { icon: ClipboardList, label: "Bill of Qty",     value: boqItems.length > 0 ? `${boqItems.length} items` : null,                   color: "text-primary" },
+          { icon: Cpu,           label: "AI Pricing",      value: approvedQ?.total_cost != null      ? fmt(approvedQ.total_cost)      : null, color: "text-primary" },
+          { icon: HardHat,       label: "Engineer Pricing", value: approvedQ?.engineer_price != null  ? fmt(approvedQ.engineer_price)  : null, color: "text-green-700" },
+          { icon: Calendar,      label: "Est. Completion",  value: approvedQ?.estimated_completion    ?? null,                                  color: "text-primary" },
+          { icon: ClipboardList, label: "Bill of Qty",      value: boqItems.length > 0 ? `${boqItems.length} items` : null,                    color: "text-primary" },
         ].map(({ icon: Icon, label, value, color }) => (
           <div key={label} className="bg-white rounded-xl border border-border p-4">
             <div className="flex items-center gap-2 mb-2">
               <Icon className="h-4 w-4 text-accent" />
               <p className="text-xs font-medium text-text-muted uppercase tracking-wide">{label}</p>
             </div>
-            <p className={`text-lg font-bold ${value ? color : "text-text-muted"}`}>
-              {value ?? "Pending"}
-            </p>
+            <p className={`text-lg font-bold ${value ? color : "text-text-muted"}`}>{value ?? "Pending"}</p>
           </div>
         ))}
       </div>
@@ -334,8 +492,9 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Uploaded Files + Add More */}
+      {/* ── Uploaded Files ─────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-border p-6 space-y-5">
+        {/* Section header */}
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-primary">Uploaded Files</h2>
           <button
@@ -353,8 +512,7 @@ export default function ProjectDetailPage() {
           <div className="border border-dashed border-accent/40 rounded-xl p-4 space-y-4 bg-surface/30">
             <p className="text-xs text-text-muted">Select files to upload — they are saved immediately upon selection.</p>
             {uploadError && (
-              <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 whitespace-pre-wrap">
-                <X className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 whitespace-pre-wrap">
                 {uploadError}
               </div>
             )}
@@ -364,7 +522,7 @@ export default function ProjectDetailPage() {
                   <p className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-1.5">{section.label}</p>
                   <button
                     type="button"
-                    onClick={() => refs[section.key].current?.click()}
+                    onClick={() => addRefs[section.key].current?.click()}
                     disabled={uploadingCategory !== null}
                     className="w-full flex flex-col items-center justify-center h-24 border-2 border-dashed border-border rounded-lg hover:border-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -378,12 +536,12 @@ export default function ProjectDetailPage() {
                     <span className="text-xs text-text-muted/70">{section.hint}</span>
                   </button>
                   <input
-                    ref={refs[section.key]}
+                    ref={addRefs[section.key]}
                     type="file"
                     accept={section.accept}
                     multiple
                     className="hidden"
-                    onChange={e => handleFileUpload(e, section.key)}
+                    onChange={e => handleAddFiles(e, section.key)}
                   />
                 </div>
               ))}
@@ -391,40 +549,58 @@ export default function ProjectDetailPage() {
           </div>
         )}
 
-        {/* File list */}
-        {project.uploads?.length > 0 ? (
+        {/* File groups */}
+        {hasFiles ? (
           <>
             {[
               { label: "Engineering Drawings", files: drawings },
-              { label: "Building Permits",     files: permits },
-              { label: "Additional Documents", files: docs },
+              { label: "Building Permits",     files: permits  },
+              { label: "Additional Documents", files: docs     },
             ].filter(g => g.files.length > 0).map(group => (
               <div key={group.label}>
                 <p className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-2">{group.label}</p>
                 <div className="space-y-2">
-                  {group.files.map(f => (
-                    <a key={f.id} href={f.public_url} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center justify-between px-4 py-3 bg-surface rounded-lg hover:bg-surface-alt transition-colors group">
-                      <div className="flex items-center gap-3">
-                        {f.file_type.startsWith("image/") ? (
-                          <FileImage className="h-4 w-4 text-accent shrink-0" />
-                        ) : (
-                          <FileText className="h-4 w-4 text-accent shrink-0" />
-                        )}
-                        <div>
-                          <p className="text-sm font-medium text-primary group-hover:text-accent transition-colors">{f.file_name}</p>
-                          <p className="text-xs text-text-muted">{formatBytes(f.file_size)}</p>
-                        </div>
-                      </div>
-                      <ExternalLink className="h-4 w-4 text-text-muted group-hover:text-accent transition-colors shrink-0" />
-                    </a>
-                  ))}
+                  {group.files.map(f => <FileRow key={f.id} f={f} />)}
                 </div>
               </div>
             ))}
           </>
         ) : (
-          <p className="text-sm text-text-muted">No files uploaded yet. Use the button above to add files.</p>
+          <p className="text-sm text-text-muted">No files uploaded yet. Use "Add Files" above.</p>
+        )}
+
+        {/* ── Submit to Admin button ─────────────────────────────────────── */}
+        {hasFiles && (
+          <div className="pt-2 border-t border-border">
+            {submitted ? (
+              <div className="flex items-center gap-3 px-5 py-4 bg-green-50 border border-green-200 rounded-xl">
+                <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-green-800">Documents submitted for review</p>
+                  <p className="text-xs text-green-700 mt-0.5">Our team will review your files and get back to you shortly.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Ready to send your documents?</p>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    Submit to notify our team to review your uploaded files.
+                  </p>
+                </div>
+                <button
+                  onClick={submitToAdmin}
+                  disabled={submitting}
+                  className="shrink-0 flex items-center gap-2 px-6 py-3 bg-accent text-white font-semibold rounded-xl hover:bg-accent-hover disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md active:scale-95"
+                >
+                  {submitting
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Submitting…</>
+                    : <><SendHorizonal className="h-4 w-4" /> Submit to Admin</>
+                  }
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
