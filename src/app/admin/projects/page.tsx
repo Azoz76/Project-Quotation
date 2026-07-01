@@ -71,7 +71,7 @@ const statusLabels: Record<string, string> = {
 
 function fmt(n: number | null | undefined) {
   if (n == null) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "SAR", maximumFractionDigits: 0 }).format(n);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "KWD", minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(n);
 }
 
 function formatBytes(b: number) {
@@ -580,7 +580,7 @@ export default function AdminProjectsPage() {
                                 {editingAi === p.id ? (
                                   <div className="space-y-3">
                                     <div>
-                                      <label className="text-xs font-medium text-text-muted">Amount (SAR)</label>
+                                      <label className="text-xs font-medium text-text-muted">Amount (KWD)</label>
                                       <input
                                         type="number"
                                         value={aiEdit[p.id]?.amount ?? ""}

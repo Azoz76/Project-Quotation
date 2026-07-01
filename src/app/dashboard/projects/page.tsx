@@ -46,7 +46,7 @@ const statusLabels: Record<string, string> = {
 
 function fmt(n: number | null | undefined) {
   if (n == null) return null;
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "SAR", maximumFractionDigits: 0 }).format(n);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "KWD", minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(n);
 }
 
 export default function ProjectsPage() {

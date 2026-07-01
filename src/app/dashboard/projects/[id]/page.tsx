@@ -79,7 +79,7 @@ const statusLabels: Record<string, string> = {
 
 function fmt(n: number | null | undefined) {
   if (n == null) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "SAR", maximumFractionDigits: 0 }).format(n);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "KWD", minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(n);
 }
 
 function formatBytes(b: number) {
@@ -314,6 +314,7 @@ export default function ProjectDetailPage() {
           total_cost: data.total_cost,
           ai_analysis: data.ai_analysis,
           bill_of_quantity: data.bill_of_quantity,
+          estimated_completion: data.estimated_completion ?? null,
           status: "generated",
         }).eq("id", existing.id);
       } else {
@@ -323,6 +324,7 @@ export default function ProjectDetailPage() {
           total_cost: data.total_cost,
           ai_analysis: data.ai_analysis,
           bill_of_quantity: data.bill_of_quantity,
+          estimated_completion: data.estimated_completion ?? null,
           status: "generated",
         });
       }
