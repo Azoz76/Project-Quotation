@@ -16,6 +16,21 @@ const HEADERS_BASE = {
   "X-Title": "Project Quotation AI",
 };
 
+// Free vision-capable models, tried in order
+const VISION_MODELS = [
+  "google/gemma-4-31b-it:free",
+  "meta-llama/llama-3.2-11b-vision-instruct:free",
+];
+
+// Free text models for synthesis, tried in order
+const SYNTHESIS_MODELS = [
+  "deepseek/deepseek-r1:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "qwen/qwen-2.5-72b-instruct:free",
+  "meta-llama/llama-3.1-8b-instruct:free",
+  "mistralai/mistral-7b-instruct:free",
+];
+
 function extractJson(text: string) {
   const stripped = text.replace(/```(?:json)?\s*/gi, "").replace(/```/g, "").trim();
   const match = stripped.match(/\{[\s\S]*\}/);
@@ -27,7 +42,7 @@ function extractJson(text: string) {
   }
 }
 
-async function callOpenRouter(apiKey: string, model: string, messages: object[], maxTokens = 4096) {
+async function callOpenRouter(apiKey: string, model: string, messages: object[], maxTokens = 4096): Promise<string> {
   const res = await fetch(OPENROUTER_BASE, {
     method: "POST",
     headers: { ...HEADERS_BASE, Authorization: `Bearer ${apiKey}` },
@@ -39,6 +54,24 @@ async function callOpenRouter(apiKey: string, model: string, messages: object[],
   }
   const data = await res.json();
   return (data.choices?.[0]?.message?.content ?? "") as string;
+}
+
+// Try each model in the list; skip on 429 / unavailable errors
+async function callWithFallback(apiKey: string, models: string[], messages: object[], maxTokens = 4096): Promise<string> {
+  const errors: string[] = [];
+  for (const model of models) {
+    try {
+      return await callOpenRouter(apiKey, model, messages, maxTokens);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errors.push(`[${model}]: ${msg}`);
+      // Only skip to next model on rate-limit or unavailability errors
+      const isRetryable = msg.includes("429") || msg.includes("402") ||
+        msg.includes("rate") || msg.includes("unavailable") || msg.includes("free");
+      if (!isRetryable) throw e;
+    }
+  }
+  throw new Error(`All models failed:\n${errors.join("\n")}`);
 }
 
 export async function POST(request: Request) {
@@ -71,8 +104,8 @@ export async function POST(request: Request) {
   const docUploads = allUploads.filter(u => !IMAGE_TYPES.has((u.file_type ?? "").toLowerCase()));
 
   try {
-    // ── STEP 1: Gemma-4 vision — extract raw information from drawings ──────
-    let extractedInfo = "No drawings uploaded. Use project description only.";
+    // ── STEP 1: Vision model — extract raw information from drawings ──────────
+    let extractedInfo = "No image drawings uploaded. Use project description and document names only.";
 
     if (imageUploads.length > 0) {
       const visionContent: ContentPart[] = [
@@ -98,15 +131,15 @@ Be as specific and detailed as possible. List every measurable quantity you can 
         })),
       ];
 
-      extractedInfo = await callOpenRouter(
+      extractedInfo = await callWithFallback(
         apiKey,
-        "google/gemma-4-31b-it:free",
+        VISION_MODELS,
         [{ role: "user", content: visionContent }],
         2048,
       );
     }
 
-    // ── STEP 2: Gemma-3-27b text — produce professional quotation from extraction ──
+    // ── STEP 2: Text model — produce professional quotation from extraction ───
     const synthesisPrompt = `You are a senior construction quantity surveyor in Saudi Arabia. Based on the project details and drawing analysis below, produce a complete professional construction quotation.
 
 PROJECT DETAILS:
@@ -134,9 +167,9 @@ Respond ONLY with a valid JSON object — no markdown, no text outside the JSON:
   ]
 }`;
 
-    const synthesisRaw = await callOpenRouter(
+    const synthesisRaw = await callWithFallback(
       apiKey,
-      "meta-llama/llama-3.3-70b-instruct:free",
+      SYNTHESIS_MODELS,
       [{ role: "user", content: synthesisPrompt }],
       4096,
     );
