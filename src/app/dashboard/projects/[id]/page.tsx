@@ -254,13 +254,14 @@ export default function ProjectDetailPage() {
     const { data: { publicUrl } } = supabase.storage.from("uploads").getPublicUrl(newPath);
 
     // Update DB record to point to new file
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await supabase.from("uploads").update({
       file_name: file.name,
       file_type: file.type || "application/octet-stream",
       file_size: file.size,
       storage_path: newPath,
       public_url: publicUrl,
-    }).eq("id", replacingUpload.id);
+    } as any).eq("id", replacingUpload.id);
 
     // Delete old file from storage
     if (replacingUpload.storage_path) {
